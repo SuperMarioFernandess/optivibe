@@ -15,6 +15,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Qt system libraries
+        # PySide6 wheels bundle Qt itself but link against system OpenGL/EGL,
+        # xkbcommon, dbus and fontconfig; bare runners lack them (libEGL.so.1).
+        # Needed even for QT_QPA_PLATFORM=offscreen: pytest-qt imports QtGui at
+        # configure time, so a missing .so kills the whole test session.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libxkbcommon0 libdbus-1-3 libfontconfig1
+
       - name: Install uv
         uses: astral-sh/setup-uv@v3
 
