@@ -1,0 +1,25 @@
+# Variant B — general-purpose wideband (doc 08 §6.2/§6.3).
+# Common optical platform R-40 (see A). Values SI except named-unit fields.
+name: B
+description: general-purpose wideband (1 Hz-10 kHz)
+mode: offresonance
+band:
+  f_min_hz: 1.0
+  f_max_hz: 10000.0
+length_m: 2.0e-3          # L = 2.0 mm  -> f1 ~ 25 kHz
+full_scale_g: 50.0
+reflector:
+  shape: cylinder
+  radius_of_curvature_m: 31.0e-6   # R_c
+  reflectivity: 0.98
+source:
+  kind: SLD
+  wavelength_m: 1550.0e-9
+  power_w: 0.016          # 16 mW
+  rin_db_hz: -126.0
+route: 2
+responsivity_a_w: 1.0
+endface_reflectivity: 0.036
+eta_bias: 0.25
+target_nea_ug_rthz: 10.0  # target ~10 ug/sqrt(Hz) (NEA ~10.6 modelled)
+vacuum: false

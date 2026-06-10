@@ -1,0 +1,27 @@
+# Physical constants — single source of truth in YAML, mirror of knowledge-base
+# document 01 §4. Code never hard-codes these (SW-03); the consistency test
+# tests/test_constants_golden.py checks them against the documented references.
+# All values are SI.
+
+fiber:
+  diameter_m: 125.0e-6        # D, cladding diameter (doc 01 §4.1)
+  radius_m: 62.5e-6           # R = D/2
+  area_m2: 1.227e-8           # S = pi R^2
+  inertia_m4: 1.198e-17       # I = pi R^4 / 4
+  youngs_modulus_pa: 72.0e9   # E = 72 GPa
+  density_kg_m3: 2201.0       # rho (fused silica)
+  poisson_ratio: 0.17         # nu
+  bar_velocity_m_s: 5719.5    # c = sqrt(E/rho)
+
+air:
+  density_kg_m3: 1.204            # rho_f at ~20 C (doc 01 §4.2)
+  dynamic_viscosity_pa_s: 1.81e-5 # mu_f
+
+universal:
+  g0_m_s2: 9.80665      # standard gravity (doc 01 §4.3)
+  beta1_l: 1.8751       # first eigenvalue beta_1 * L
+  phi1_at_tip: 2.000    # mode-1 shape at tip phi_1(1)
+  phi1_dd_at_root: 7.032  # mode-1 curvature at root phi_1''(0)
+
+# Rigid tilt-displacement coupling theta * L / delta = 1.377 (doc 01 §0, 04 §2).
+tilt_displacement_coupling_per_l: 1.377

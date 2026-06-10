@@ -1,0 +1,27 @@
+# Variant A — low-frequency, high-resolution (doc 08 §6.2/§6.3).
+# Common optical platform R-40: lambda=1550 nm, rho=0.98 (metallized),
+# R=1 A/W, R1=0.036, route 2, eta0 bias rule (~0.25). Values are SI except
+# where a unit is named in the field (g, ug/sqrt(Hz), dB/Hz).
+name: A
+description: low-frequency high-resolution (0.1-100 Hz)
+mode: offresonance
+band:
+  f_min_hz: 0.1
+  f_max_hz: 100.0
+length_m: 5.0e-3          # L = 5.0 mm  -> f1 ~ 4.0 kHz
+full_scale_g: 5.0
+reflector:
+  shape: cylinder
+  radius_of_curvature_m: 62.5e-6   # R_c
+  reflectivity: 0.98               # rho (metallized)
+source:
+  kind: SLD
+  wavelength_m: 1550.0e-9
+  power_w: 0.020          # 20 mW (range 20-50 mW)
+  rin_db_hz: -126.0
+route: 2
+responsivity_a_w: 1.0
+endface_reflectivity: 0.036
+eta_bias: 0.25
+target_nea_ug_rthz: 1.0   # target ~1 ug/sqrt(Hz) (NEA ~0.1-0.5 achievable)
+vacuum: false

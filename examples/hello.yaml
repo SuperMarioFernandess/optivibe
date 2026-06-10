@@ -1,0 +1,32 @@
+# Hello scenario — the S0 acceptance run. A single 120 Hz tone on the target
+# axis (x) flows through the whole pipeline (sine -> stub mechanics/optics/
+# detector -> stub DSP) and the inverse stage must recover ~120 Hz as the
+# dominant frequency. Run head-less with:  optivibe run examples/hello.yaml
+name: hello
+variant: B                 # general-purpose wideband (1 Hz-10 kHz)
+
+excitation:
+  kind: sine
+  axis: x                  # target axis (doc 01 §1)
+  fs_hz: 5000.0
+  duration_s: 1.0          # -> 5000 samples, 1 Hz frequency resolution
+  frequency_hz: 120.0
+  amplitude_g: 1.0
+
+# Stage selection (all default to the S0 stubs; shown explicitly for clarity).
+stages:
+  excitation: sine
+  mechanics: stub
+  optics: stub
+  detector: stub
+  dsp: stub
+
+dsp:
+  integrator: frequency
+  spectrum_method: fft
+  window: hann
+
+seed: 12345
+
+output:
+  save: false

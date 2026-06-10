@@ -1,0 +1,14 @@
+# Hello scenario (minimal form): everything except the excitation relies on the
+# default S0 stage selection and DSP options. Equivalent to examples/hello.yaml.
+name: hello-min
+variant: B
+
+excitation:
+  kind: sine
+  axis: x
+  fs_hz: 5000.0
+  duration_s: 1.0
+  frequency_hz: 120.0
+  amplitude_g: 1.0
+
+seed: 12345

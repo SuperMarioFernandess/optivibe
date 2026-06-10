@@ -1,0 +1,25 @@
+# Variant C — high-frequency wideband (doc 08 §6.2/§6.3).
+# Common optical platform R-40 (see A). Values SI except named-unit fields.
+name: C
+description: high-frequency wideband (10 Hz-20 kHz)
+mode: offresonance
+band:
+  f_min_hz: 10.0
+  f_max_hz: 20000.0
+length_m: 1.41e-3         # L = 1.41 mm  -> f1 ~ 50 kHz
+full_scale_g: 50.0
+reflector:
+  shape: cylinder
+  radius_of_curvature_m: 31.0e-6   # R_c
+  reflectivity: 0.98
+source:
+  kind: SLD
+  wavelength_m: 1550.0e-9
+  power_w: 0.016          # 16 mW (range 16-50 mW)
+  rin_db_hz: -126.0
+route: 2
+responsivity_a_w: 1.0
+endface_reflectivity: 0.036
+eta_bias: 0.25
+target_nea_ug_rthz: 40.0  # target ~30-50 ug/sqrt(Hz) (NEA ~24-43 modelled)
+vacuum: false
