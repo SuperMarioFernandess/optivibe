@@ -18,11 +18,15 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v3
 
-      - name: Set up Python
-        run: uv python install 3.11
+      - name: Create venv and install (core + dev + gui)
+        # The runner's system Python is externally managed (PEP 668, Ubuntu 24.04),
+        # so we install into a project venv instead of using --system.
+        run: |
+          uv venv --python 3.11
+          uv pip install -e ".[dev,gui]"
 
-      - name: Install (core + dev + gui)
-        run: uv pip install --system -e ".[dev,gui]"
+      - name: Add venv to PATH
+        run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Lint (ruff)
         run: ruff check .
