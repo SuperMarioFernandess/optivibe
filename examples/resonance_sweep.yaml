@@ -1,0 +1,29 @@
+# Resonance sweep — sweep through the first bending mode of variant D
+# (f1 ~ 5.005 kHz, Q = 1500 in air, doc 08 §5) with the modal mechanics (S2).
+# The tip response |H(f)| shows the quasi-static plateau and the x Q resonant
+# peak; the dominant frequency of the run lands on f1. The amplitude (1 mg) is
+# inside variant D's full scale (22 mg).
+# Run from the repo root:  optivibe run examples/resonance_sweep.yaml
+name: resonance-sweep
+variant: D
+
+excitation:
+  kind: sweep
+  axis: x
+  fs_hz: 20000.0
+  duration_s: 2.0
+  f_start_hz: 3500.0
+  f_end_hz: 6500.0
+  amplitude_g: 0.001
+  method: linear
+
+stages:
+  excitation: sweep
+  mechanics: modal
+
+# Per-scenario mechanics overrides (S2): uncomment to override the variant's
+# documented quality factor (docs 07/08).
+# mechanics:
+#   q_total: 3000.0
+
+seed: 12345

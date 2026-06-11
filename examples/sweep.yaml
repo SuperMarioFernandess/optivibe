@@ -15,5 +15,6 @@ excitation:
 
 stages:
   excitation: sweep
+  mechanics: modal     # physical modal mechanics (S2 default; explicit here)
 
 seed: 12345

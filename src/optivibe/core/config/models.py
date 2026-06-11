@@ -56,6 +56,7 @@ class UniversalConstants(_Frozen):
 
     g0_m_s2: float = Field(gt=0.0, description="Standard gravity g0, m/s^2")
     beta1_l: float = Field(gt=0.0, description="First eigenvalue beta_1 * L (dimensionless)")
+    beta2_l: float = Field(gt=0.0, description="Second eigenvalue beta_2 * L (doc 02 §2)")
     phi1_at_tip: float = Field(description="Mode-1 shape at tip phi_1(1)")
     phi1_dd_at_root: float = Field(
         description="Mode-1 curvature at root phi_1''(0), for the doc-01 normalization phi_1(1)=2"
@@ -153,6 +154,8 @@ class VariantConfig(_Frozen):
         Fiber endface Fresnel reflectivity R1.
     eta_bias : float
         Optical working-point efficiency eta0.
+    q_total : float
+        Total quality factor of mode 1 at this variant's length (docs 07/08).
     target_nea_ug_rthz : float or None
         Placeholder target noise-equivalent acceleration, ug/sqrt(Hz) (O-09).
     vacuum : bool
@@ -172,6 +175,13 @@ class VariantConfig(_Frozen):
     responsivity_a_w: float = Field(gt=0.0, description="PD responsivity R, A/W")
     endface_reflectivity: float = Field(ge=0.0, le=1.0, description="Endface Fresnel R1")
     eta_bias: float = Field(gt=0.0, le=1.0, description="Optical bias eta0")
+    q_total: float = Field(
+        gt=0.0,
+        description=(
+            "Total mechanical quality factor Q of mode 1 at this variant's L "
+            "(docs 07 §4.3 / 08; overridable per scenario via mechanics.q_total)"
+        ),
+    )
     target_nea_ug_rthz: float | None = Field(default=None, gt=0.0)
     vacuum: bool = False
 
@@ -370,15 +380,32 @@ class DspOptions(_Frozen):
     window: str = "hann"
 
 
+class MechanicsOptions(_Frozen):
+    """Per-scenario overrides of the mechanics stage (S2).
+
+    Attributes
+    ----------
+    q_total : float or None
+        Override of the variant's quality factor ``q_total`` (docs 07/08); the
+        variant value is used when None. Forwarded to the mechanics
+        implementation constructor by the orchestrator.
+    """
+
+    q_total: float | None = Field(
+        default=None, gt=0.0, description="Quality-factor override (variant value if None)"
+    )
+
+
 class StageSelection(_Frozen):
     """Registry keys selecting the implementation of each stage (09 §6).
 
-    Defaults point to the S0 stub/identity implementations; later chats add
-    physical implementations selectable by changing these keys.
+    Defaults point to the physical implementations where they exist ("modal"
+    mechanics since S2) and to the S0 stubs elsewhere; the stubs remain
+    registered for regression under their explicit keys.
     """
 
     excitation: StageKey = "sine"
-    mechanics: StageKey = "stub"
+    mechanics: StageKey = "modal"
     optics: StageKey = "stub"
     detector: StageKey = "stub"
     dsp: StageKey = "stub"
@@ -404,6 +431,8 @@ class ScenarioConfig(_Frozen):
         Input-signal description.
     stages : StageSelection
         Registry keys selecting each stage implementation.
+    mechanics : MechanicsOptions
+        Per-scenario mechanics overrides (S2).
     dsp : DspOptions
         Inverse/DSP options.
     seed : int or None
@@ -416,6 +445,7 @@ class ScenarioConfig(_Frozen):
     variant: Literal["A", "B", "C", "D"]
     excitation: ExcitationSpec
     stages: StageSelection = StageSelection()
+    mechanics: MechanicsOptions = MechanicsOptions()
     dsp: DspOptions = DspOptions()
     seed: int | None = None
     output: OutputSpec = OutputSpec()

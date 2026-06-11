@@ -17,6 +17,10 @@ source:
   wavelength_m: 1550.0e-9
   power_w: 0.016          # 16 mW (range 16-50 mW)
   rin_db_hz: -126.0
+# Q_total at L=1.41 mm = 1950 — conservative documented value (doc 07
+# §2.3, R-26: anchor-limited bound of the 1950..5490 range; mounting-
+# dependent).
+q_total: 1950.0
 route: 2
 responsivity_a_w: 1.0
 endface_reflectivity: 0.036

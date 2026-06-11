@@ -17,6 +17,9 @@ source:
   wavelength_m: 1550.0e-9
   power_w: 0.016          # 16 mW
   rin_db_hz: -126.0
+# Q_total at L=2.0 mm = 2610 — tabulated (doc 07 §4.3 scaling table;
+# doc 08 §3.B: L=2.0 mm coincides with the Q_total(L) peak ~2610).
+q_total: 2610.0
 route: 2
 responsivity_a_w: 1.0
 endface_reflectivity: 0.036

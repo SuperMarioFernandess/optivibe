@@ -19,6 +19,12 @@ source:
   wavelength_m: 1550.0e-9
   power_w: 0.020          # 20 mW (range 20-50 mW)
   rin_db_hz: -126.0
+# Q_total at L=5.0 mm: DERIVED via the documented scaling Q_air ~ 1/L
+# (doc 07 §2.3: Q_air(3mm)=2377 -> Q_air(5mm)~1426; Q_anchor=2.17(L/D)^3
+# ~1.4e5 is negligible in parallel). Not a tabulated number of 07 §4.3
+# (table ends at 4.0 mm) — to be refined by the computable Q(L) model
+# (loop, doc 14 §8).
+q_total: 1430.0
 route: 2
 responsivity_a_w: 1.0
 endface_reflectivity: 0.036

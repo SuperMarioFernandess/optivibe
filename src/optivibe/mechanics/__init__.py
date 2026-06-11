@@ -1,44 +1,45 @@
 """Mechanics stage: base acceleration -> tip state q_tip(t).
 
-S0 ships a *non-physical* structural identity: it carries the time series through
-unchanged so the pipeline is exercised end to end. S2 replaces it with the modal
-model and the lateral transfer ``H_lat(f)`` from documents 02/05, including the
-rigid tilt-displacement coupling ``theta = 1.377 * delta / L`` (doc 04 §2).
+S2 replaces the S0 stub by the modal cantilever model of docs 02/05: the
+frequency-domain solver "modal" (default since S2) and the time-domain
+state-space solver "modal_time", both built on
+:class:`~optivibe.mechanics.cantilever.CantileverModel`. The S0 stub remains
+registered under "stub" for regression. Selection: ``stages.mechanics`` in the
+scenario (SW-02); the quality factor comes from the variant preset
+(``q_total``, docs 07/08) and may be overridden per scenario via
+``mechanics.q_total``.
 """
 
 from __future__ import annotations
 
-import numpy as np
-
-from optivibe.core.config.models import VariantConfig
 from optivibe.core.registry import Registry
 from optivibe.core.stages import MechanicsStage
-from optivibe.core.types import Excitation, TipState
+from optivibe.mechanics.cantilever import (
+    CantileverModel,
+    axial_qs_compliance,
+    first_mode_hz,
+    lateral_qs_compliance,
+    second_mode_hz,
+    tilt_coupling_per_m,
+)
+from optivibe.mechanics.modal import ModalFrequencyMechanics, ModalTimeMechanics
+from optivibe.mechanics.stub import StubMechanics
 
 MECHANICS_REGISTRY: Registry[MechanicsStage] = Registry("mechanics")
 
-__all__ = ["MECHANICS_REGISTRY", "StubMechanics"]
+MECHANICS_REGISTRY.register("stub")(StubMechanics)
+MECHANICS_REGISTRY.register("modal")(ModalFrequencyMechanics)
+MECHANICS_REGISTRY.register("modal_time")(ModalTimeMechanics)
 
-
-@MECHANICS_REGISTRY.register("stub")
-class StubMechanics:
-    """Identity placeholder mapping acceleration channels to tip channels.
-
-    Warnings
-    --------
-    Not physical: ``dx/dy/dz`` are set equal to the input acceleration and the
-    tilts are zero. Used only to validate the contract wiring in S0. The
-    quantitative model arrives in S2.
-    """
-
-    def run(self, excitation: Excitation, variant: VariantConfig) -> TipState:
-        """Carry the signal through (structural identity)."""
-        zeros = np.zeros(excitation.n_samples, dtype=np.float64)
-        return TipState(
-            dx=excitation.a_x,
-            dy=excitation.a_y,
-            dz=excitation.a_z,
-            theta_x=zeros.copy(),
-            theta_y=zeros.copy(),
-            fs=excitation.fs,
-        )
+__all__ = [
+    "MECHANICS_REGISTRY",
+    "CantileverModel",
+    "ModalFrequencyMechanics",
+    "ModalTimeMechanics",
+    "StubMechanics",
+    "axial_qs_compliance",
+    "first_mode_hz",
+    "lateral_qs_compliance",
+    "second_mode_hz",
+    "tilt_coupling_per_m",
+]

@@ -20,6 +20,7 @@ air:
 universal:
   g0_m_s2: 9.80665      # standard gravity (doc 01 §4.3)
   beta1_l: 1.8751       # first eigenvalue beta_1 * L
+  beta2_l: 4.6941       # second eigenvalue beta_2 * L (doc 02 §2)
   phi1_at_tip: 2.000    # mode-1 shape at tip phi_1(1)
   phi1_dd_at_root: 7.032  # mode-1 curvature at root phi_1''(0)
 

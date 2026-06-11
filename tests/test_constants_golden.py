@@ -5,6 +5,11 @@ the documented reference numbers (doc 01), be internally self-consistent
 (``S = pi R^2``, ``I = pi R^4 / 4``, ``c = sqrt(E/rho)``), and reproduce the
 documented first-mode scaling law ``f1 ~ 100 / L[mm]^2 kHz`` (doc 08, R-31) for
 each variant length, matching the documented headline ``f1`` of A/B/C/D.
+
+Since S2 the mode-frequency formula lives in the mechanics package
+(:func:`optivibe.mechanics.first_mode_hz`); the local analytical transcription
+below stays as an independent reference and the package function is
+cross-checked against it.
 """
 
 from __future__ import annotations
@@ -15,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from optivibe.core.config import Constants, load_constants, load_variant
+from optivibe.mechanics import first_mode_hz
 
 pytestmark = pytest.mark.golden
 
@@ -50,6 +56,7 @@ def test_constants_match_doc01(config_dir: Path) -> None:
     u = c.universal
     assert u.g0_m_s2 == pytest.approx(9.80665)
     assert u.beta1_l == pytest.approx(1.8751)
+    assert u.beta2_l == pytest.approx(4.6941)
     assert u.phi1_at_tip == pytest.approx(2.000)
     assert u.phi1_dd_at_root == pytest.approx(7.032)
 
@@ -70,9 +77,17 @@ def test_first_mode_scaling_law(config_dir: Path) -> None:
     c = load_constants(config_dir / "constants.yaml")
     for length_mm in (1.41, 2.0, 5.0, 4.47):
         length_m = length_mm * 1.0e-3
-        f1_khz = _first_mode_hz(c, length_m) / 1.0e3
+        f1_khz = first_mode_hz(c, length_m) / 1.0e3
         prefactor = f1_khz * length_mm**2
         assert prefactor == pytest.approx(100.0, rel=2.0e-3)
+
+
+def test_package_first_mode_matches_local_transcription(config_dir: Path) -> None:
+    """The mechanics-package formula equals the independent transcription."""
+    c = load_constants(config_dir / "constants.yaml")
+    for length_mm in (1.25, 1.41, 2.0, 3.0, 4.47, 5.0):
+        length_m = length_mm * 1.0e-3
+        assert first_mode_hz(c, length_m) == pytest.approx(_first_mode_hz(c, length_m), rel=1.0e-12)
 
 
 # Documented headline first-mode frequencies (doc 08 §6), Hz.
@@ -83,5 +98,5 @@ EXPECTED_F1_HZ = {"A": 4.0e3, "B": 25.0e3, "C": 50.0e3, "D": 5.0e3}
 def test_variant_first_mode_matches_doc08(name: str, config_dir: Path) -> None:
     c = load_constants(config_dir / "constants.yaml")
     v = load_variant(name, config_dir=config_dir)
-    f1 = _first_mode_hz(c, v.length_m)
+    f1 = first_mode_hz(c, v.length_m)
     assert f1 == pytest.approx(EXPECTED_F1_HZ[name], rel=2.0e-2)

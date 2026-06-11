@@ -106,7 +106,17 @@ class Pipeline:
         self._variant = variant
         stages = scenario.stages
         self._excitation: ExcitationSource = EXCITATION_REGISTRY.create(stages.excitation)
-        self._mechanics: MechanicsStage = MECHANICS_REGISTRY.create(stages.mechanics)
+        # Scenario-level mechanics overrides (S2): only explicitly set options
+        # are forwarded, so option-less implementations (the stub) still
+        # construct; an unsupported option fails loudly (10 §7).
+        mechanics_overrides = {
+            key: value
+            for key, value in scenario.mechanics.model_dump().items()
+            if value is not None
+        }
+        self._mechanics: MechanicsStage = MECHANICS_REGISTRY.create(
+            stages.mechanics, **mechanics_overrides
+        )
         self._optics: OpticsStage = OPTICS_REGISTRY.create(stages.optics)
         self._detector: DetectorStage = DETECTOR_REGISTRY.create(stages.detector)
         self._dsp: DspStage = DSP_REGISTRY.create(stages.dsp)

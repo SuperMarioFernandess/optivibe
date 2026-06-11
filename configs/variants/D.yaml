@@ -21,6 +21,10 @@ source:
   wavelength_m: 1550.0e-9
   power_w: 0.100          # 100 mW
   rin_db_hz: -155.0
+# Q_total at L=4.47 mm in air = 1500 — doc 08 §5 (Q_air(4.47mm)~1500,
+# air-limited; FS=22 mg of this variant was derived with this Q).
+# Vacuum Q (1e4..1e5) is deferred with the Q(L) model (loop, 14 §8).
+q_total: 1500.0
 route: 1
 responsivity_a_w: 1.0
 endface_reflectivity: 0.036
