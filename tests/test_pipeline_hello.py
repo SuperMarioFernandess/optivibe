@@ -8,8 +8,8 @@ import pytest
 
 from optivibe.cli.main import main
 from optivibe.core.config.models import (
-    ExcitationSpec,
     ScenarioConfig,
+    SineSpec,
     StageSelection,
 )
 from optivibe.core.registry import RegistryError
@@ -59,7 +59,7 @@ def test_unknown_stage_key_raises(config_dir: Path) -> None:
     scenario = ScenarioConfig(
         name="bad",
         variant="B",
-        excitation=ExcitationSpec(
+        excitation=SineSpec(
             kind="sine", axis="x", fs_hz=1000.0, duration_s=0.1, frequency_hz=50.0, amplitude_g=1.0
         ),
         stages=StageSelection(mechanics="does-not-exist"),

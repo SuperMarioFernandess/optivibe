@@ -13,7 +13,7 @@ loudly at load time (10 §7, no silent failures).
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -186,15 +186,180 @@ class VariantConfig(_Frozen):
 # --------------------------------------------------------------------------- #
 # Scenario configuration (one reproducible run; doc 09 §8, 11 §6).
 # --------------------------------------------------------------------------- #
-class ExcitationSpec(_Frozen):
-    """Excitation generator parameters (S0 supports ``sine``; full set in S1)."""
+class _ExcitationBase(_Frozen):
+    """Fields shared by every excitation spec.
 
-    kind: Literal["sine"] = "sine"
+    The signal is generated on (or mapped to) the single axis ``axis``; the two
+    remaining axes are zero. Different per-axis signals are a planned extension
+    (a future composite kind), kept out of v-S1 so the default semantics of
+    ``axis`` stay unchanged (task S1; doc 11 §2.1).
+    """
+
     axis: Literal["x", "y", "z"] = "x"
+
+
+class _GeneratedBase(_ExcitationBase):
+    """Fields shared by synthetic generators (sampling grid is user-defined)."""
+
     fs_hz: float = Field(gt=0.0, description="Sampling frequency, Hz")
     duration_s: float = Field(gt=0.0, description="Signal duration, s")
+
+
+class SineSpec(_GeneratedBase):
+    """Single-tone sine excitation (the S0 acceptance signal)."""
+
+    kind: Literal["sine"] = "sine"
     frequency_hz: float = Field(gt=0.0, description="Sine frequency, Hz")
     amplitude_g: float = Field(gt=0.0, description="Sine amplitude, g")
+
+
+class Tone(_Frozen):
+    """One tone of a multitone signal.
+
+    Accepts the compact sequence form ``[frequency_hz, amplitude_g]`` or
+    ``[frequency_hz, amplitude_g, phase_rad]`` in YAML, as well as the explicit
+    mapping form.
+    """
+
+    frequency_hz: float = Field(gt=0.0, description="Tone frequency, Hz")
+    amplitude_g: float = Field(gt=0.0, description="Tone amplitude, g")
+    phase_rad: float = Field(default=0.0, description="Initial phase, rad")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_sequence(cls, value: object) -> object:
+        if isinstance(value, (list, tuple)):
+            if not 2 <= len(value) <= 3:
+                msg = f"tone sequence must be (frequency_hz, amplitude_g[, phase_rad]), got {value}"
+                raise ValueError(msg)
+            keys = ("frequency_hz", "amplitude_g", "phase_rad")
+            return dict(zip(keys, value, strict=False))
+        return value
+
+
+class MultitoneSpec(_GeneratedBase):
+    """Sum of sine tones with individual frequency/amplitude/phase."""
+
+    kind: Literal["multitone"] = "multitone"
+    tones: tuple[Tone, ...] = Field(min_length=1, description="Tones of the signal")
+
+
+class SweepSpec(_GeneratedBase):
+    """Constant-amplitude frequency sweep (chirp), linear or logarithmic."""
+
+    kind: Literal["sweep"] = "sweep"
+    f_start_hz: float = Field(gt=0.0, description="Start frequency, Hz")
+    f_end_hz: float = Field(gt=0.0, description="End frequency, Hz")
+    amplitude_g: float = Field(gt=0.0, description="Sweep amplitude, g")
+    method: Literal["linear", "log"] = "linear"
+
+
+class RandomSpec(_GeneratedBase):
+    """Band-limited random noise with a target RMS level or one-sided PSD.
+
+    Exactly one of ``g_rms`` (band RMS, g) or ``psd_g2_hz`` (flat one-sided PSD
+    level, g^2/Hz) must be given. The synthesis shapes the spectrum directly in
+    the frequency domain (see :mod:`optivibe.excitation.random_noise`).
+    """
+
+    kind: Literal["random"] = "random"
+    band_hz: tuple[float, float] = Field(description="Band (f_lo, f_hi), Hz")
+    g_rms: float | None = Field(default=None, gt=0.0, description="Target band RMS, g")
+    psd_g2_hz: float | None = Field(
+        default=None, gt=0.0, description="Target one-sided PSD level, g^2/Hz"
+    )
+    shape: Literal["flat"] = "flat"
+
+    @model_validator(mode="after")
+    def _check(self) -> RandomSpec:
+        f_lo, f_hi = self.band_hz
+        if not 0.0 <= f_lo < f_hi:
+            msg = f"band_hz must satisfy 0 <= f_lo < f_hi, got {self.band_hz}"
+            raise ValueError(msg)
+        if f_hi > self.fs_hz / 2.0:
+            msg = f"band upper edge {f_hi} Hz exceeds Nyquist {self.fs_hz / 2.0} Hz"
+            raise ValueError(msg)
+        if (self.g_rms is None) == (self.psd_g2_hz is None):
+            msg = "exactly one of g_rms or psd_g2_hz must be set"
+            raise ValueError(msg)
+        return self
+
+
+class ShockSpec(_GeneratedBase):
+    """Single shock pulse (half-sine in v-S1) with optional pre-delay."""
+
+    kind: Literal["shock"] = "shock"
+    shape: Literal["half_sine"] = "half_sine"
+    peak_g: float = Field(gt=0.0, description="Peak acceleration, g")
+    pulse_ms: float = Field(gt=0.0, description="Pulse duration, ms")
+    delay_s: float = Field(default=0.0, ge=0.0, description="Quiet time before pulse, s")
+
+    @model_validator(mode="after")
+    def _check_fits(self) -> ShockSpec:
+        if self.delay_s + self.pulse_ms / 1.0e3 > self.duration_s:
+            msg = (
+                f"delay_s + pulse ({self.delay_s} s + {self.pulse_ms} ms) "
+                f"exceeds duration_s = {self.duration_s} s"
+            )
+            raise ValueError(msg)
+        return self
+
+
+class CsvSpec(_ExcitationBase):
+    """Replay of a measured acceleration record from a CSV file (seam SW-08).
+
+    The sampling rate comes from the file: either a time column is given (fs is
+    inferred from the median time step) or ``fs_hz`` must be set explicitly.
+    ``resample_hz`` optionally resamples to a new rate (polyphase).
+    """
+
+    kind: Literal["csv"] = "csv"
+    path: str = Field(description="Path to the CSV file")
+    column: int | str = Field(default=1, description="Data column: 0-based index or header name")
+    time_column: int | str | None = Field(
+        default=None, description="Time column (s) to infer fs; index or header name"
+    )
+    fs_hz: float | None = Field(
+        default=None, gt=0.0, description="Sampling rate, Hz (required if no time column)"
+    )
+    units: Literal["g", "m/s^2"] = Field(default="m/s^2", description="Units of the data column")
+    delimiter: str = Field(default=",", description="Field delimiter")
+    skiprows: int = Field(default=0, ge=0, description="Rows to skip before header/data")
+    resample_hz: float | None = Field(default=None, gt=0.0, description="Target rate, Hz")
+
+    @model_validator(mode="after")
+    def _check_rate(self) -> CsvSpec:
+        if self.time_column is None and self.fs_hz is None:
+            msg = "csv excitation needs either time_column or fs_hz"
+            raise ValueError(msg)
+        return self
+
+
+class WavSpec(_ExcitationBase):
+    """Replay of a measured acceleration record from a WAV file (seam SW-08).
+
+    Integer PCM samples are normalized to [-1, 1]; ``full_scale_g`` maps the
+    normalized full scale (|1.0|) to acceleration in g. The sampling rate comes
+    from the file header; ``resample_hz`` optionally resamples (polyphase).
+    """
+
+    kind: Literal["wav"] = "wav"
+    path: str = Field(description="Path to the WAV file")
+    channel: int = Field(default=0, ge=0, description="0-based channel index")
+    full_scale_g: float = Field(gt=0.0, description="Acceleration at normalized full scale, g")
+    resample_hz: float | None = Field(default=None, gt=0.0, description="Target rate, Hz")
+
+
+ExcitationSpec = Annotated[
+    SineSpec | MultitoneSpec | SweepSpec | RandomSpec | ShockSpec | CsvSpec | WavSpec,
+    Field(discriminator="kind"),
+]
+"""Discriminated union of all excitation specs, selected by ``kind`` (S1).
+
+The S0 form ``ExcitationSpec(kind="sine", ...)`` maps one-to-one onto
+:class:`SineSpec`, so existing scenarios (``examples/hello.yaml``) parse
+unchanged.
+"""
 
 
 class DspOptions(_Frozen):

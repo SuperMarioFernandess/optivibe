@@ -96,7 +96,8 @@ warn_unused_configs = true
 
 [[tool.mypy.overrides]]
 # Heavy optional deps without complete stubs are treated as Any on import.
-# matplotlib/plotly are added back when the viz package starts importing them (S6).
+# matplotlib >= 3.8 ships py.typed, so viz/ (S1) type-checks without an override;
+# plotly is added here if/when viz starts importing it (S6).
 module = [
     "scipy.*",
     "pyqtgraph.*",
