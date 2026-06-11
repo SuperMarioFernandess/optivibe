@@ -1,0 +1,20 @@
+# Half-sine shock example — 50 g peak, 1 ms pulse after 50 ms of quiet
+# (the 50 g limit of spec doc 00; above-limit behaviour is a study case).
+# Run from the repo root:  optivibe run examples/shock.yaml
+name: shock-demo
+variant: B
+
+excitation:
+  kind: shock
+  axis: x
+  fs_hz: 50000.0
+  duration_s: 0.2
+  shape: half_sine
+  peak_g: 50.0
+  pulse_ms: 1.0
+  delay_s: 0.05
+
+stages:
+  excitation: shock
+
+seed: 12345

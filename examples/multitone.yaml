@@ -1,0 +1,21 @@
+# Multitone example — three tones on the target axis. Compact tone form
+# [frequency_hz, amplitude_g(, phase_rad)] is accepted alongside mappings.
+# Run from the repo root:  optivibe run examples/multitone.yaml
+name: multitone-demo
+variant: B
+
+excitation:
+  kind: multitone
+  axis: x
+  fs_hz: 8000.0
+  duration_s: 1.0
+  tones:
+    - [120.0, 1.0]
+    - [440.0, 0.5, 1.5707963267948966]
+    - frequency_hz: 1000.0
+      amplitude_g: 0.25
+
+stages:
+  excitation: multitone
+
+seed: 12345

@@ -1,0 +1,19 @@
+# Band-limited random noise example — 20 Hz..2 kHz, 1 g RMS in the band.
+# Level may equivalently be given as a flat one-sided PSD: psd_g2_hz.
+# Run from the repo root:  optivibe run examples/random.yaml
+name: random-demo
+variant: B
+
+excitation:
+  kind: random
+  axis: x
+  fs_hz: 8000.0
+  duration_s: 2.0
+  band_hz: [20.0, 2000.0]
+  g_rms: 1.0
+  shape: flat
+
+stages:
+  excitation: random
+
+seed: 12345

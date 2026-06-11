@@ -1,0 +1,19 @@
+# CSV replay example (data seam SW-08) — the sampling rate is inferred from
+# the time column; the data column is selected by header name and recorded in
+# g (converted to SI at the loader boundary).
+# Run from the repo root:  optivibe run examples/replay_csv.yaml
+name: replay-csv-demo
+variant: B
+
+excitation:
+  kind: csv
+  axis: x
+  path: examples/data/example_accel.csv   # relative to the current working directory
+  time_column: time_s
+  column: accel_g
+  units: g
+
+stages:
+  excitation: csv
+
+seed: 12345

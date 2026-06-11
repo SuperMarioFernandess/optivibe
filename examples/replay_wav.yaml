@@ -1,0 +1,17 @@
+# WAV replay example (data seam SW-08) — int16 PCM is normalized to [-1, 1]
+# and full scale is mapped to 5 g.
+# Run from the repo root:  optivibe run examples/replay_wav.yaml
+name: replay-wav-demo
+variant: B
+
+excitation:
+  kind: wav
+  axis: x
+  path: examples/data/example_accel.wav   # relative to the current working directory
+  channel: 0
+  full_scale_g: 5.0
+
+stages:
+  excitation: wav
+
+seed: 12345

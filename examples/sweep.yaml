@@ -1,0 +1,19 @@
+# Logarithmic sweep example — 10 Hz -> 2 kHz over 2 s at 0.5 g.
+# Run from the repo root:  optivibe run examples/sweep.yaml
+name: sweep-demo
+variant: B
+
+excitation:
+  kind: sweep
+  axis: x
+  fs_hz: 8000.0
+  duration_s: 2.0
+  f_start_hz: 10.0
+  f_end_hz: 2000.0
+  amplitude_g: 0.5
+  method: log
+
+stages:
+  excitation: sweep
+
+seed: 12345
