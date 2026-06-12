@@ -114,6 +114,37 @@ class ReflectorConfig(_Frozen):
     )
 
 
+class OpticsConfig(_Frozen):
+    """Optical working-point parameters (mirror of docs 03 §1/§6 and 08 §2).
+
+    Attributes
+    ----------
+    gap_m : float
+        Nominal air gap A between the fiber endface and the reflector, m.
+        Documented parametric band 20-40 um (doc 03 §6); the default 31 um is
+        the S3 calibration anchoring eta0/eta_peak/slope to the doc 04/05
+        references within 5 % (journal entry of 2026-06-12).
+    bias_offset_m : float
+        Intentional static de-centering Delta x0 setting the working point
+        eta0 on the slope (docs 03 §5, 04 §4). The SNR-optimum rule
+        eta0 ~ 0.37 * eta_peak (doc 08, R-40/O-05) is exposed as a helper
+        (:meth:`optivibe.optics.cylinder.CylinderOpticsModel.bias_for_eta_ratio`);
+        in v1 the bias is a static config value.
+    mode_field_radius_m : float
+        Gaussian mode-field radius w0 of the fiber at the source wavelength, m
+        (doc 03 §1: w0 = 5.2 um at 1550 nm for SMF-28). Lives in the variant
+        (not in constants.yaml) because it is tied to the source wavelength.
+    """
+
+    gap_m: float = Field(default=31.0e-6, gt=0.0, description="Air gap A, m (doc 03 §6)")
+    bias_offset_m: float = Field(
+        default=2.0e-6, ge=0.0, description="Working-point de-centering Delta x0, m (doc 03 §5)"
+    )
+    mode_field_radius_m: float = Field(
+        default=5.2e-6, gt=0.0, description="Mode-field radius w0, m (doc 03 §1)"
+    )
+
+
 class SourceConfig(_Frozen):
     """Optical source parameters (doc 08 §6; R-13, R-15, R-30)."""
 
@@ -153,7 +184,13 @@ class VariantConfig(_Frozen):
     endface_reflectivity : float
         Fiber endface Fresnel reflectivity R1.
     eta_bias : float
-        Optical working-point efficiency eta0.
+        Optical working-point efficiency eta0 used by the *stub* optics (S0);
+        the physical "cylinder" optics computes its own eta0 from
+        ``optics.bias_offset_m`` (S3) and reports it in
+        ``OpticalResponse.bias``.
+    optics : OpticsConfig
+        Optical working-point parameters (gap A, bias Delta x0, mode-field
+        radius w0; docs 03/08, S3).
     q_total : float
         Total quality factor of mode 1 at this variant's length (docs 07/08).
     target_nea_ug_rthz : float or None
@@ -174,7 +211,8 @@ class VariantConfig(_Frozen):
     route: Literal[1, 2] = 2
     responsivity_a_w: float = Field(gt=0.0, description="PD responsivity R, A/W")
     endface_reflectivity: float = Field(ge=0.0, le=1.0, description="Endface Fresnel R1")
-    eta_bias: float = Field(gt=0.0, le=1.0, description="Optical bias eta0")
+    eta_bias: float = Field(gt=0.0, le=1.0, description="Optical bias eta0 (stub optics)")
+    optics: OpticsConfig = OpticsConfig()
     q_total: float = Field(
         gt=0.0,
         description=(
@@ -400,13 +438,14 @@ class StageSelection(_Frozen):
     """Registry keys selecting the implementation of each stage (09 §6).
 
     Defaults point to the physical implementations where they exist ("modal"
-    mechanics since S2) and to the S0 stubs elsewhere; the stubs remain
-    registered for regression under their explicit keys.
+    mechanics since S2, "cylinder" optics since S3) and to the S0 stubs
+    elsewhere; the stubs remain registered for regression under their explicit
+    keys.
     """
 
     excitation: StageKey = "sine"
     mechanics: StageKey = "modal"
-    optics: StageKey = "stub"
+    optics: StageKey = "cylinder"
     detector: StageKey = "stub"
     dsp: StageKey = "stub"
 

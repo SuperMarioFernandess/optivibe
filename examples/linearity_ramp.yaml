@@ -1,0 +1,27 @@
+# Linearity ramp (S3) — drive variant B near its first mode (f1 ~ 25.0 kHz,
+# Q = 2610) with a narrow sweep so the resonant tip amplitude crosses the
+# documented small-signal boundary w_tip ~ 0.5 um (doc 03 §5: |slope| drops /
+# harmonics appear as dx approaches sigma ~ 1.28 um). At 0.5 g the plateau
+# response is ~8 nm while the resonant peak reaches ~0.8 um > 0.5 um, so the
+# run exhibits visible gain compression and harmonic distortion by design —
+# the dominant frequency is reported, not pinned.
+# Run from the repo root:  optivibe run examples/linearity_ramp.yaml
+name: linearity-ramp
+variant: B
+
+excitation:
+  kind: sweep
+  axis: x
+  fs_hz: 200000.0
+  duration_s: 2.0
+  f_start_hz: 24500.0
+  f_end_hz: 25500.0
+  amplitude_g: 0.5
+  method: linear
+
+stages:
+  excitation: sweep
+  mechanics: modal
+  optics: cylinder         # physical S3 optics (explicit for clarity)
+
+seed: 12345

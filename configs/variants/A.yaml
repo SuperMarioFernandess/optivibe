@@ -31,3 +31,10 @@ endface_reflectivity: 0.036
 eta_bias: 0.25
 target_nea_ug_rthz: 1.0   # target ~1 ug/sqrt(Hz) (NEA ~0.1-0.5 achievable)
 vacuum: false
+# Optical working point (doc 03 §1/§6; S3 calibration, journal 2026-06-12):
+# A = 31 um anchors eta0/eta_peak/slopes to the doc 04/05 references within 5 %;
+# Delta x0 = 2 um is the documented bias at R_c = 62.5 um (doc 03 §5).
+optics:
+  gap_m: 31.0e-6            # air gap A (parametric band 20-40 um, doc 03 §6)
+  bias_offset_m: 2.0e-6     # working-point de-centering Delta x0 (doc 03 §5)
+  mode_field_radius_m: 5.2e-6  # w0 at 1550 nm, SMF-28 (doc 03 §1)
