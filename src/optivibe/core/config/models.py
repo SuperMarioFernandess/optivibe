@@ -63,6 +63,30 @@ class UniversalConstants(_Frozen):
     )
 
 
+class DetectorConstants(_Frozen):
+    """Universal/environment constants for the detector noise budget (doc 07).
+
+    The elementary charge and Boltzmann constant are the exact SI-2019 values;
+    the temperature mirrors document 07 §2.5 (``T = 293 K``). These are not in
+    the document-01 table (mechanics did not need them), so they are added here
+    as a detector-specific constants block. All values have ``Field`` defaults,
+    so a ``constants.yaml`` without a ``detector`` block still validates.
+
+    Attributes
+    ----------
+    elementary_charge_c : float
+        Elementary charge ``e``, C (shot noise ``2 e I_DC``; doc 07 §1.1).
+    boltzmann_j_k : float
+        Boltzmann constant ``kB``, J/K (Johnson noise ``4 kB T / Rf``; 07 §1.3).
+    temperature_k : float
+        Absolute temperature ``T``, K (doc 07 §2.5).
+    """
+
+    elementary_charge_c: float = Field(default=1.602176634e-19, gt=0.0, description="e, C")
+    boltzmann_j_k: float = Field(default=1.380649e-23, gt=0.0, description="kB, J/K")
+    temperature_k: float = Field(default=293.0, gt=0.0, description="T, K (doc 07 §2.5)")
+
+
 class Constants(_Frozen):
     """Top-level physical constants bundle (doc 01).
 
@@ -74,6 +98,8 @@ class Constants(_Frozen):
         Air properties for damping.
     universal : UniversalConstants
         Universal and cantilever geometric constants.
+    detector : DetectorConstants
+        Universal/environment constants for the detector noise budget (doc 07).
     tilt_displacement_coupling_per_l : float
         Dimensionless rigid coupling ``theta * L / delta = 1.377`` (doc 01 §0,
         04 §2); divide by ``L`` to obtain ``theta / delta`` in 1/m.
@@ -82,6 +108,7 @@ class Constants(_Frozen):
     fiber: FiberConstants
     air: AirConstants
     universal: UniversalConstants
+    detector: DetectorConstants = DetectorConstants()
     tilt_displacement_coupling_per_l: float = Field(
         gt=0.0, description="theta * L / delta coupling (1.377), dimensionless"
     )
@@ -145,6 +172,69 @@ class OpticsConfig(_Frozen):
     )
 
 
+class DetectorConfig(_Frozen):
+    """Detector front-end and ADC parameters (mirror of docs 07/08; S4).
+
+    Mirrors the new detector-electronics numbers of documents 07 (noise budget)
+    and 08 §6 (per-variant front-end). The optical numbers feeding the read-out
+    (``P``, ``R``, ``rho``, ``R1``, source ``RIN``) already live on
+    :class:`VariantConfig`/:class:`SourceConfig`/:class:`ReflectorConfig`; this
+    block adds only what the detector stage introduces.
+
+    Attributes
+    ----------
+    balanced : bool
+        Whether the balanced reference channel is active (R-23, doc 07 §1.2).
+        Default ``True``: RIN is common-mode and suppressed by ``cmrr_db``.
+    cmrr_db : float
+        Common-mode rejection ratio of the balanced channel, dB. Default 40 dB:
+        within the documented auto-balanced range 30-70 dB (doc 07 §1.2) and
+        enough to keep the read-out shot-limited at the variant's operating
+        power (30 dB suffices only near 1 mW; RIN does not improve with power).
+    transimpedance_ohm : float or None
+        Feedback resistor ``Rf``, ohm. Sets the Johnson-noise floor
+        ``4 kB T / Rf`` referred to current (doc 07 §1.3); ``None`` removes the
+        electronics floor (the ``Rf -> inf`` limit). Also the voltage gain when
+        ``output == "voltage"``. The DC pedestal is AC-coupled away before the
+        gain stage (doc 07 §1.4), so a large ``Rf`` does not saturate the TIA.
+    output : {"current", "voltage"}
+        Whether ``samples`` are photocurrent (A) or transimpedance voltage (V).
+    adc_bits : int
+        ADC resolution in bits. Default 24 (precision sigma-delta vibration DAQ),
+        so quantization stays well below the electronic noise floor.
+    adc_full_scale : float
+        ADC full scale (the +/- range) for the AC-coupled modulation, in the
+        output units (A or V). The DC pedestal is reported separately and not
+        digitized (doc 07 §1.4). Inputs beyond +/- full scale are clipped.
+    adc_fs_hz : float or None
+        Optional ADC/decimation rate, Hz; ``None`` keeps the optical ``fs``
+        (identity). When below ``fs`` the signal is resampled (anti-aliased when
+        ``antialias`` is set).
+    antialias : bool
+        Whether to anti-alias-filter before decimation (doc 11 §2). Ignored when
+        ``adc_fs_hz`` is ``None`` or ``>= fs``.
+    rin_shape : {"white"}
+        Spectral form of the RIN PSD. Only the white level is modelled in v-S4;
+        a frequency-dependent shape is a recorded extension (doc 07 §1.2).
+    """
+
+    balanced: bool = True
+    cmrr_db: float = Field(default=40.0, description="Balanced-channel CMRR, dB (doc 07 §1.2)")
+    transimpedance_ohm: float | None = Field(
+        default=1.0e5, gt=0.0, description="Feedback resistor Rf, ohm (Johnson floor; doc 07 §1.3)"
+    )
+    output: Literal["current", "voltage"] = "current"
+    adc_bits: int = Field(default=24, ge=1, le=32, description="ADC resolution, bits")
+    adc_full_scale: float = Field(
+        default=1.0e-4, gt=0.0, description="AC full scale (+/- range) in output units"
+    )
+    adc_fs_hz: float | None = Field(
+        default=None, gt=0.0, description="ADC rate, Hz (None=identity)"
+    )
+    antialias: bool = True
+    rin_shape: Literal["white"] = "white"
+
+
 class SourceConfig(_Frozen):
     """Optical source parameters (doc 08 §6; R-13, R-15, R-30)."""
 
@@ -191,6 +281,9 @@ class VariantConfig(_Frozen):
     optics : OpticsConfig
         Optical working-point parameters (gap A, bias Delta x0, mode-field
         radius w0; docs 03/08, S3).
+    detector : DetectorConfig
+        Detector front-end and ADC parameters (balanced channel, CMRR, Rf, ADC;
+        docs 07/08, S4).
     q_total : float
         Total quality factor of mode 1 at this variant's length (docs 07/08).
     target_nea_ug_rthz : float or None
@@ -213,6 +306,7 @@ class VariantConfig(_Frozen):
     endface_reflectivity: float = Field(ge=0.0, le=1.0, description="Endface Fresnel R1")
     eta_bias: float = Field(gt=0.0, le=1.0, description="Optical bias eta0 (stub optics)")
     optics: OpticsConfig = OpticsConfig()
+    detector: DetectorConfig = DetectorConfig()
     q_total: float = Field(
         gt=0.0,
         description=(
@@ -434,6 +528,29 @@ class MechanicsOptions(_Frozen):
     )
 
 
+class DetectorOptions(_Frozen):
+    """Per-scenario overrides of the detector stage (S4).
+
+    Mirrors the :class:`MechanicsOptions` pattern: only explicitly set fields are
+    forwarded to the detector implementation by the orchestrator; the
+    option-less ``"stub"`` detector keeps constructing with no arguments. The
+    noise seed is *not* a field here -- it is derived from the scenario-level
+    ``seed`` and injected by the orchestrator (the ``run()`` protocol carries no
+    seed; doc 10 §8).
+
+    Attributes
+    ----------
+    balanced : bool or None
+        Override of the variant's balanced-channel flag
+        (``variant.detector.balanced``); the variant value is used when ``None``.
+        Setting ``balanced: false`` exposes the unsuppressed RIN (doc 07 §1.2).
+    """
+
+    balanced: bool | None = Field(
+        default=None, description="Balanced-channel override (variant value if None)"
+    )
+
+
 class StageSelection(_Frozen):
     """Registry keys selecting the implementation of each stage (09 §6).
 
@@ -472,6 +589,8 @@ class ScenarioConfig(_Frozen):
         Registry keys selecting each stage implementation.
     mechanics : MechanicsOptions
         Per-scenario mechanics overrides (S2).
+    detector : DetectorOptions
+        Per-scenario detector overrides (S4).
     dsp : DspOptions
         Inverse/DSP options.
     seed : int or None
@@ -485,6 +604,7 @@ class ScenarioConfig(_Frozen):
     excitation: ExcitationSpec
     stages: StageSelection = StageSelection()
     mechanics: MechanicsOptions = MechanicsOptions()
+    detector: DetectorOptions = DetectorOptions()
     dsp: DspOptions = DspOptions()
     seed: int | None = None
     output: OutputSpec = OutputSpec()

@@ -39,6 +39,10 @@ from optivibe.optics import OPTICS_REGISTRY
 
 logger = get_logger(__name__)
 
+# The option-less detector key: it is constructed with no arguments (no seed, no
+# overrides), so the orchestrator skips the S4 seed/override injection for it.
+_STUB_DETECTOR_KEY = "stub"
+
 __all__ = ["ForwardArtifacts", "Pipeline", "RunArtifacts", "run_scenario"]
 
 
@@ -118,7 +122,19 @@ class Pipeline:
             stages.mechanics, **mechanics_overrides
         )
         self._optics: OpticsStage = OPTICS_REGISTRY.create(stages.optics)
-        self._detector: DetectorStage = DETECTOR_REGISTRY.create(stages.detector)
+        # Scenario-level detector overrides (S4), same pattern as mechanics: only
+        # explicitly set options are forwarded, so the option-less "stub" still
+        # constructs. The run() protocol carries no seed, so the scenario seed is
+        # handed to the constructor for non-stub detectors, which derive an
+        # independent, reproducible noise sub-stream from it (10 §8).
+        detector_overrides = {
+            key: value for key, value in scenario.detector.model_dump().items() if value is not None
+        }
+        if stages.detector != _STUB_DETECTOR_KEY:
+            detector_overrides.setdefault("scenario_seed", scenario.seed)
+        self._detector: DetectorStage = DETECTOR_REGISTRY.create(
+            stages.detector, **detector_overrides
+        )
         self._dsp: DspStage = DSP_REGISTRY.create(stages.dsp)
         logger.debug(
             "pipeline built: variant=%s stages=%s",

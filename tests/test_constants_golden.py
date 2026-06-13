@@ -63,6 +63,14 @@ def test_constants_match_doc01(config_dir: Path) -> None:
     assert c.tilt_displacement_coupling_per_l == pytest.approx(1.377)
 
 
+def test_detector_constants_match_doc07() -> None:
+    """Detector noise constants are the SI-2019 values and T from doc 07 §2.5."""
+    d = load_constants().detector
+    assert d.elementary_charge_c == pytest.approx(1.602176634e-19)
+    assert d.boltzmann_j_k == pytest.approx(1.380649e-23)
+    assert d.temperature_k == pytest.approx(293.0)
+
+
 def test_constants_self_consistent(config_dir: Path) -> None:
     f = load_constants(config_dir / "constants.yaml").fiber
     assert f.area_m2 == pytest.approx(math.pi * f.radius_m**2, rel=1e-3)

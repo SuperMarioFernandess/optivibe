@@ -34,3 +34,15 @@ optics:
   gap_m: 31.0e-6            # air gap A (parametric band 20-40 um, doc 03 §6)
   bias_offset_m: 0.992e-6   # Delta x0 scaled by R_c ratio (doc 08 §2 scaling)
   mode_field_radius_m: 5.2e-6  # w0 at 1550 nm, SMF-28 (doc 03 §1)
+# Detector front-end and ADC (docs 07/08; S4). Balanced channel + CMRR 40 dB
+# (auto-balanced range 30-70 dB, doc 07 §1.2); 30 dB suffices only near 1 mW,
+# so 40 dB keeps the 16 mW read-out shot-limited (RIN does not improve with
+# power). Rf = 100 kOhm is the Johnson floor (doc 07 §1.3). AC-coupled ADC
+# (doc 07 §1.4); FS swing |s_target|*FS*g0 ~ 95 uA at 50 g.
+detector:
+  balanced: true
+  cmrr_db: 40.0
+  transimpedance_ohm: 1.0e5
+  output: current
+  adc_bits: 24
+  adc_full_scale: 1.3e-4      # +/- range, A (~1.3x the ~95 uA FS swing at 50 g)

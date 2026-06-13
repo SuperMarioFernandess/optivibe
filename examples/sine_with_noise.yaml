@@ -1,0 +1,26 @@
+# Small-signal-with-noise scenario (S4) — variant B, photodiode detector, a
+# 10 mg tone a few times above the noise floor so the dominant is still
+# recovered while the noise is visible (doc 07 §1). Run head-less with:
+#   optivibe run examples/sine_with_noise.yaml
+name: sine-with-noise
+variant: B
+
+excitation:
+  kind: sine
+  axis: x
+  fs_hz: 5000.0
+  duration_s: 2.0
+  frequency_hz: 200.0
+  amplitude_g: 0.01        # 10 mg: signal RMS ~ a few x the noise floor
+
+stages:
+  excitation: sine
+  mechanics: modal
+  optics: cylinder
+  detector: photodiode
+  dsp: stub
+
+seed: 7                    # reproducible noise realization
+
+output:
+  save: false

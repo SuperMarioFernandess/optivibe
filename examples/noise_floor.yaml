@@ -1,0 +1,27 @@
+# Noise-floor scenario (S4) — variant B with the physical photodiode detector
+# and a negligible excitation, so the detector output is the bare noise floor
+# (shot + RIN + Johnson; doc 07 §1). Used to exercise the AC-coupled ADC and to
+# check the simulated floor against the analytic NEA. Run head-less with:
+#   optivibe run examples/noise_floor.yaml
+name: noise-floor
+variant: B                 # general-purpose wideband; NEA shelf ~ tens of ug/rtHz
+
+excitation:
+  kind: sine
+  axis: x
+  fs_hz: 5000.0
+  duration_s: 2.0          # 10000 samples -> 0.5 Hz resolution for the floor
+  frequency_hz: 100.0
+  amplitude_g: 1.0e-9      # effectively zero: the output is detector noise only
+
+stages:
+  excitation: sine
+  mechanics: modal
+  optics: cylinder
+  detector: photodiode     # S4 physical read-out (noise + ADC)
+  dsp: stub
+
+seed: 2026                 # one seed -> bit-identical noise (doc 10 §8)
+
+output:
+  save: false
