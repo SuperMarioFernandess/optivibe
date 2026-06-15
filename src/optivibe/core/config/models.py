@@ -186,6 +186,15 @@ class DetectorConfig(_Frozen):
     balanced : bool
         Whether the balanced reference channel is active (R-23, doc 07 §1.2).
         Default ``True``: RIN is common-mode and suppressed by ``cmrr_db``.
+    reference_arm : {"matched", "bright"}
+        Reference-arm shot model of the balanced channel (open question
+        O-SW-08). ``"matched"`` (default) -- two equal arms, the signal arm at
+        full power, so the difference carries shot from both arms and the shot
+        PSD doubles (the conservative ``<= sqrt(2)`` RMS floor of doc 07 §1.2).
+        ``"bright"`` -- ``P_ref >> P_sig`` / normalization, leaving the bare
+        ``2 e I_DC`` (the datasheet / doc-08 shot limit). Ignored when
+        ``balanced`` is ``False``. Flip this to compare the two NEA conventions
+        at test time (see the journal O-SW-08).
     cmrr_db : float
         Common-mode rejection ratio of the balanced channel, dB. Default 40 dB:
         within the documented auto-balanced range 30-70 dB (doc 07 §1.2) and
@@ -219,6 +228,7 @@ class DetectorConfig(_Frozen):
     """
 
     balanced: bool = True
+    reference_arm: Literal["matched", "bright"] = "matched"
     cmrr_db: float = Field(default=40.0, description="Balanced-channel CMRR, dB (doc 07 §1.2)")
     transimpedance_ohm: float | None = Field(
         default=1.0e5, gt=0.0, description="Feedback resistor Rf, ohm (Johnson floor; doc 07 §1.3)"
@@ -544,10 +554,19 @@ class DetectorOptions(_Frozen):
         Override of the variant's balanced-channel flag
         (``variant.detector.balanced``); the variant value is used when ``None``.
         Setting ``balanced: false`` exposes the unsuppressed RIN (doc 07 §1.2).
+    reference_arm : {"matched", "bright"} or None
+        Override of the variant's reference-arm shot model
+        (``variant.detector.reference_arm``); the variant value is used when
+        ``None``. Flip between ``"matched"`` (conservative two-arm floor) and
+        ``"bright"`` (datasheet shot limit) to compare NEA conventions at test
+        time (open question O-SW-08).
     """
 
     balanced: bool | None = Field(
         default=None, description="Balanced-channel override (variant value if None)"
+    )
+    reference_arm: Literal["matched", "bright"] | None = Field(
+        default=None, description="Reference-arm shot model override (variant value if None)"
     )
 
 

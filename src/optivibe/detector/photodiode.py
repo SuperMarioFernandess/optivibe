@@ -137,11 +137,14 @@ def signal_multiplier(endface_reflectivity: float, reflectivity: float, eta0: fl
     return 1.0 + endface_reflectivity / (reflectivity * eta0)
 
 
-def shot_psd(i_dc_a: float, elementary_charge_c: float, *, balanced: bool) -> float:
-    """One-sided shot-noise current PSD ``2 e I_DC`` [A^2/Hz] (doc 07 §1.1).
+def shot_psd(i_dc_a: float, elementary_charge_c: float, *, arm_factor: float = 1.0) -> float:
+    """One-sided shot-noise current PSD ``arm_factor * 2 e I_DC`` [A^2/Hz] (07 §1.1).
 
-    With the balanced reference channel the shot PSD is doubled (two matched
-    arms; the conservative ``<= sqrt(2)`` RMS case of doc 07 §1.2).
+    The bare single-detector shot PSD is ``2 e I_DC``. ``arm_factor`` carries the
+    reference-arm model of the balanced channel (doc 07 §1.2): ``1.0`` for a
+    single-ended / bright-reference channel (``P_ref >> P_sig``, the datasheet
+    shot limit) and ``2.0`` for two matched arms (the conservative ``<= sqrt(2)``
+    RMS case). It is *not* suppressed by the CMRR -- shot is uncorrelated.
 
     Parameters
     ----------
@@ -149,16 +152,42 @@ def shot_psd(i_dc_a: float, elementary_charge_c: float, *, balanced: bool) -> fl
         DC photocurrent ``I_DC``, A.
     elementary_charge_c : float
         Elementary charge ``e``, C.
-    balanced : bool
-        Whether the balanced reference channel is active.
+    arm_factor : float, optional
+        Reference-arm shot multiplier (1.0 single/bright, 2.0 matched).
 
     Returns
     -------
     float
         Shot-noise PSD, A^2/Hz.
     """
-    arm_factor = 2.0 if balanced else 1.0
     return arm_factor * 2.0 * elementary_charge_c * i_dc_a
+
+
+def shot_arm_factor(*, balanced: bool, reference_arm: str) -> float:
+    """Map the balanced channel + reference-arm model to the shot multiplier.
+
+    Open question O-SW-08: which convention is "the" NEA is deferred to test-time
+    evaluation. ``"matched"`` (two equal arms, signal arm at full power) doubles
+    the shot PSD -- the conservative engineering floor; ``"bright"``
+    (``P_ref >> P_sig`` / normalization) leaves it at ``2 e I_DC`` -- the
+    datasheet/doc-08 shot limit. A single-ended channel (``balanced=False``) also
+    uses the bare ``2 e I_DC``.
+
+    Parameters
+    ----------
+    balanced : bool
+        Whether the balanced reference channel is active.
+    reference_arm : {"matched", "bright"}
+        Reference-arm model (only meaningful when ``balanced``).
+
+    Returns
+    -------
+    float
+        Shot multiplier (1.0 or 2.0).
+    """
+    if balanced and reference_arm == "matched":
+        return 2.0
+    return 1.0
 
 
 def rin_psd(i_dc_a: float, rin_db_hz: float, cmrr_db: float, *, balanced: bool) -> float:
@@ -221,6 +250,7 @@ def noise_psd(
     constants: Constants,
     *,
     balanced: bool,
+    reference_arm: str | None = None,
 ) -> dict[str, float]:
     """Assemble the one-sided current-noise PSD components (doc 07 §1).
 
@@ -234,6 +264,9 @@ def noise_psd(
         Physical constants (``e``, ``kB``, ``T``).
     balanced : bool
         Whether the balanced reference channel is active.
+    reference_arm : {"matched", "bright"} or None, optional
+        Reference-arm shot model (O-SW-08); the variant's
+        ``detector.reference_arm`` is used when None.
 
     Returns
     -------
@@ -243,7 +276,9 @@ def noise_psd(
     """
     det = variant.detector
     dc = constants.detector
-    shot = shot_psd(i_dc_a, dc.elementary_charge_c, balanced=balanced)
+    arm = det.reference_arm if reference_arm is None else reference_arm
+    arm_factor = shot_arm_factor(balanced=balanced, reference_arm=arm)
+    shot = shot_psd(i_dc_a, dc.elementary_charge_c, arm_factor=arm_factor)
     rin = rin_psd(i_dc_a, variant.source.rin_db_hz, det.cmrr_db, balanced=balanced)
     johnson = johnson_psd(det.transimpedance_ohm, dc.boltzmann_j_k, dc.temperature_k)
     return {"shot": shot, "rin": rin, "johnson": johnson, "total": shot + rin + johnson}
@@ -325,6 +360,11 @@ class PhotodiodeDetector:
         Per-scenario override of the variant's balanced-channel flag; the
         variant value (``variant.detector.balanced``) is used when ``None``.
         Injected by the orchestrator from ``scenario.detector``.
+    reference_arm : {"matched", "bright"} or None, optional
+        Per-scenario override of the reference-arm shot model (O-SW-08); the
+        variant value (``variant.detector.reference_arm``) is used when ``None``.
+        ``"matched"`` doubles the shot PSD (conservative two-arm floor),
+        ``"bright"`` keeps the bare ``2 e I_DC`` (datasheet/doc-08 shot limit).
     scenario_seed : int or None, optional
         The scenario seed; an independent, reproducible noise sub-stream is
         derived from it (:func:`detector_seed_sequence`). Injected by the
@@ -338,6 +378,7 @@ class PhotodiodeDetector:
         self,
         *,
         balanced: bool | None = None,
+        reference_arm: str | None = None,
         scenario_seed: int | None = None,
         constants: Constants | None = None,
     ) -> None:
@@ -345,6 +386,7 @@ class PhotodiodeDetector:
             constants = load_constants(default_config_dir() / "constants.yaml")
         self._constants = constants
         self._balanced_override = balanced
+        self._reference_arm_override = reference_arm
         self._rng = np.random.default_rng(detector_seed_sequence(scenario_seed))
 
     def run(self, optical: OpticalResponse, variant: VariantConfig) -> DetectorOutput:
@@ -367,6 +409,11 @@ class PhotodiodeDetector:
         """
         det: DetectorConfig = variant.detector
         balanced = self._balanced_override if self._balanced_override is not None else det.balanced
+        reference_arm = (
+            self._reference_arm_override
+            if self._reference_arm_override is not None
+            else det.reference_arm
+        )
 
         gain = variant.responsivity_a_w * variant.source.power_w
         r1 = variant.endface_reflectivity
@@ -378,7 +425,9 @@ class PhotodiodeDetector:
 
         # Stationary current-noise from the DC operating point (doc 07 §1). The
         # noise depends only on I_DC, so it is additive w.r.t. the signal.
-        psd = noise_psd(i_dc, variant, self._constants, balanced=balanced)
+        psd = noise_psd(
+            i_dc, variant, self._constants, balanced=balanced, reference_arm=reference_arm
+        )
         nyquist_bw = optical.fs / 2.0
         sigma_i = float(np.sqrt(psd["total"] * nyquist_bw))
         noise_current: FloatArray = self._rng.standard_normal(current.size) * sigma_i
@@ -423,6 +472,7 @@ class PhotodiodeDetector:
         noise_meta: dict[str, object] = {
             "model": "photodiode",
             "balanced": balanced,
+            "reference_arm": reference_arm,
             "i_dc_a": i_dc,
             "psd_shot_a2_hz": psd["shot"],
             "psd_rin_a2_hz": psd["rin"],

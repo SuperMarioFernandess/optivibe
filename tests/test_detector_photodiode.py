@@ -121,6 +121,35 @@ def test_noise_psd_components_analytic(
 
 
 @pytest.mark.golden
+@pytest.mark.parametrize(
+    ("balanced", "reference_arm", "expected_factor"),
+    [(True, "matched", 2.0), (True, "bright", 1.0), (False, "matched", 1.0)],
+)
+def test_reference_arm_shot_conventions(
+    variant_b: VariantConfig,
+    constants: Constants,
+    eta0_b: float,
+    balanced: bool,
+    reference_arm: str,
+    expected_factor: float,
+) -> None:
+    """Both NEA shot conventions are first-class and switchable (O-SW-08).
+
+    'matched' doubles the shot PSD (conservative two-arm floor); 'bright' keeps
+    the bare 2 e I_DC (datasheet/doc-08 shot limit); a single-ended channel also
+    uses the bare value.
+    """
+    from optivibe.detector import shot_arm_factor
+
+    assert shot_arm_factor(balanced=balanced, reference_arm=reference_arm) == expected_factor
+    gain = variant_b.responsivity_a_w * variant_b.source.power_w
+    i_dc = gain * (variant_b.endface_reflectivity + variant_b.reflector.reflectivity * eta0_b)
+    psd = noise_psd(i_dc, variant_b, constants, balanced=balanced, reference_arm=reference_arm)
+    e = constants.detector.elementary_charge_c
+    assert psd["shot"] == pytest.approx(expected_factor * 2.0 * e * i_dc, rel=1e-12)
+
+
+@pytest.mark.golden
 def test_rin_suppression_equals_cmrr(variant_b: VariantConfig) -> None:
     """Balanced RIN suppression equals the CMRR within 1 dB (doc 07 §1.2)."""
     i_dc = 3.0e-3

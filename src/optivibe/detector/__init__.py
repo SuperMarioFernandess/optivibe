@@ -30,6 +30,7 @@ from optivibe.detector.photodiode import (
     PhotodiodeDetector,
     detector_seed_sequence,
     noise_psd,
+    shot_arm_factor,
     signal_multiplier,
 )
 
@@ -41,6 +42,7 @@ __all__ = [
     "StubDetector",
     "detector_seed_sequence",
     "noise_psd",
+    "shot_arm_factor",
     "signal_multiplier",
 ]
 
