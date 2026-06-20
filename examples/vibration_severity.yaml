@@ -1,0 +1,36 @@
+# Vibration-severity scenario (S5) — variant B, photodiode detector, the
+# calibrated "standard" inverse chain feeding an ISO 10816-3 / 20816-3
+# assessment. A narrow-band 50 Hz tone at 0.15 g gives a broadband RMS velocity
+# of ~3.3 mm/s in the assessment band: for the default Group 2 / rigid class
+# (A/B 1.4, B/C 2.8, C/D 4.5 mm/s) this lands in zone C -- "unsatisfactory for
+# long-term operation" -- a clear, non-trivial severity reading (doc 05 §7;
+# ISO 10816-3 §5). Run head-less with:
+#   optivibe run examples/vibration_severity.yaml
+name: vibration-severity
+variant: B
+
+excitation:
+  kind: sine
+  axis: x
+  fs_hz: 5000.0
+  duration_s: 2.0
+  frequency_hz: 50.0        # in the ISO assessment band
+  amplitude_g: 0.15         # -> v_rms ~ 3.3 mm/s -> ISO zone C
+
+stages:
+  excitation: sine
+  mechanics: modal
+  optics: cylinder
+  detector: photodiode
+  dsp: standard
+
+dsp:
+  integrator: frequency
+  spectrum_method: welch    # PSD basis for the band RMS velocity
+  window: hann
+  iso_machine_class: group2_rigid
+
+seed: 7
+
+output:
+  save: false

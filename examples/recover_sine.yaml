@@ -1,0 +1,35 @@
+# Recover-sine scenario (S5) — variant B, photodiode detector, the calibrated
+# "standard" inverse chain. A 1 g tone at 200 Hz is driven through the forward
+# model (modal -> cylinder -> photodiode) and reconstructed on the target axis:
+# the recovered acceleration matches the input to well within the noise floor
+# (NEA ~ 25 ug/sqrt(Hz), so the 1 g tone has SNR >> 1), the dominant line is
+# 200 Hz and the a -> v -> x kinematics give the analytic A/omega, A/omega^2
+# amplitudes (doc 05 §7). Run head-less with:
+#   optivibe run examples/recover_sine.yaml
+name: recover-sine
+variant: B
+
+excitation:
+  kind: sine
+  axis: x
+  fs_hz: 5000.0
+  duration_s: 2.0
+  frequency_hz: 200.0
+  amplitude_g: 1.0          # strong tone, SNR >> 1 against the ~25 ug/rtHz floor
+
+stages:
+  excitation: sine
+  mechanics: modal
+  optics: cylinder
+  detector: photodiode
+  dsp: standard             # S5 calibrated inverse (s_target, kinematics, NEA)
+
+dsp:
+  integrator: frequency     # spectral 1/(j omega); "time" is the alternative
+  spectrum_method: fft
+  window: hann
+
+seed: 7                     # reproducible noise realization
+
+output:
+  save: false

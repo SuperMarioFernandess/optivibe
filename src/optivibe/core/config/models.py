@@ -515,11 +515,49 @@ unchanged.
 
 
 class DspOptions(_Frozen):
-    """Inverse/DSP options (full behaviour lands in S5)."""
+    """Inverse/DSP options (S5).
+
+    Attributes
+    ----------
+    integrator : {"frequency", "time"}
+        Kinematic integrator method ``a -> v -> x`` (registry key, S5 §2).
+        ``"frequency"`` is spectral ``1/(j omega)`` with a high-pass mask;
+        ``"time"`` is cumulative-trapezoid with a Butterworth detrend.
+    spectrum_method : {"fft", "welch"}
+        Spectral estimator for the representative spectrum and dominant-peak
+        search (S5 §3): single rFFT amplitude or a Welch PSD.
+    window : str
+        Window name for the Welch PSD and windowed amplitude spectrum
+        (default ``"hann"``).
+    f_hp_hz : float or None
+        High-pass cut-off for the integrators, Hz; ``None`` uses the variant's
+        lower band edge (doc 08). Removes the double-integration drift.
+    welch_nperseg : int or None
+        Welch segment length; ``None`` lets the estimator choose from the record
+        length.
+    welch_noverlap : int or None
+        Welch segment overlap; ``None`` uses ``nperseg // 2``.
+    calibration : {"ideal", "bench"}
+        Calibration source (S5 §1): ``"ideal"`` computes ``s_target`` from the
+        config and the S3/S2 models (known exactly, the v1 default); ``"bench"``
+        is the stand-estimated sensitivity (helper for S6).
+    deconvolve_hlat : bool
+        Whether to divide out ``|H_lat(f)|`` to approach ``f1`` (S5 §1); the
+        default ``False`` uses the flat plateau scalar (the off-resonance mode).
+    iso_machine_class : str
+        ISO 10816-3 machine class for the severity assessment (key into
+        ``optivibe.dsp.iso.ISO_10816_3_ZONES``; default ``"group2_rigid"``).
+    """
 
     integrator: Literal["frequency", "time"] = "frequency"
     spectrum_method: Literal["fft", "welch"] = "fft"
     window: str = "hann"
+    f_hp_hz: float | None = Field(default=None, gt=0.0, description="HP cut-off, Hz (band if None)")
+    welch_nperseg: int | None = Field(default=None, gt=0, description="Welch segment length")
+    welch_noverlap: int | None = Field(default=None, ge=0, description="Welch segment overlap")
+    calibration: Literal["ideal", "bench"] = "ideal"
+    deconvolve_hlat: bool = False
+    iso_machine_class: str = "group2_rigid"
 
 
 class MechanicsOptions(_Frozen):
