@@ -13,7 +13,7 @@ jobs:
   quality:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Qt system libraries
         # PySide6 wheels bundle Qt itself but link against system OpenGL/EGL,
@@ -26,7 +26,7 @@ jobs:
             libegl1 libgl1 libxkbcommon0 libdbus-1-3 libfontconfig1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v7
 
       - name: Create venv and install (core + dev + gui)
         # The runner's system Python is externally managed (PEP 668, Ubuntu 24.04),
