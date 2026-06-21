@@ -1,0 +1,23 @@
+# Tolerance Monte-Carlo (S6 §B8): NEA and cross-axis suppression spread for
+# variant B under anchor->Q, R_c, gap, bias and the technological de-centering
+# epsilon_x (a per-run extra x-bias, the S3-deferred parameter, 14 §8). Each
+# draw derives a reproducible sub-stream from the seed. Run with:
+#   optivibe sweep examples/montecarlo_tolerances.yaml --out out/montecarlo
+kind: montecarlo
+name: montecarlo_tolerances
+variant: B
+n_draws: 128
+cross_axis: true
+frequency_hz: 120.0
+amplitude_g: 10.0
+fs_hz: 5000.0
+duration_s: 0.3
+tolerances:
+  q_total:               {dist: lognormal, rel_sigma: 0.30}   # anchor -> Q (R-26/R-31)
+  radius_of_curvature_m: {dist: normal,    rel_sigma: 0.05}   # +/- 5 %
+  gap_m:                 {dist: normal,    abs_sigma: 5.0e-6}  # +/- ~10 um (doc 08 §7)
+  bias_offset_m:         {dist: normal,    abs_sigma: 0.1e-6}  # working-point stability
+  epsilon_x:             {dist: normal,    abs_sigma: 0.1e-6}  # alignment de-centering
+seed: 7
+output:
+  save: true

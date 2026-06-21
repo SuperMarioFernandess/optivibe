@@ -1,0 +1,16 @@
+# Design sweep (S6 §B7): plateau NEA and f1 vs cantilever length L for variant B.
+# No time-domain run -- recomputes the analytic s_target/NEA at each L, so it
+# reproduces the family law NEA ~ L^-4 and f1 ~ 1/L^2 (doc 07 R-31). Run with:
+#   optivibe sweep examples/nea_vs_L.yaml --out out/nea_vs_L
+kind: sweep
+name: nea_vs_L
+mode: design
+variant: B
+parameter: length_m
+grid:
+  start: 1.0e-3        # 1.0 mm
+  stop: 4.0e-3         # 4.0 mm (the optical-linearity edge, doc 07 §4.3)
+  num: 16
+  log: false
+output:
+  save: true

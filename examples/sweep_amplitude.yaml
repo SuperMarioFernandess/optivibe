@@ -1,0 +1,26 @@
+# Response sweep (S6 §B7): recovered response vs drive amplitude 0.1 g -> 120 g
+# for variant B at 200 Hz. Below ~50 g the recovery is linear (gain_ratio ~ 1,
+# THD ~ 0); above it the optical curvature raises THD and the ADC saturates
+# (gain droop, n_clipped > 0) -- the >50 g behaviour of doc 00. Run with:
+#   optivibe sweep examples/sweep_amplitude.yaml --out out/sweep_amplitude
+kind: sweep
+name: sweep_amplitude
+mode: response
+variant: B
+parameter: amplitude_g
+grid:
+  start: 0.1
+  stop: 120.0
+  num: 14
+  log: true
+frequency_hz: 200.0
+fs_hz: 5000.0
+duration_s: 0.5
+detector:
+  reference_arm: matched
+dsp:
+  sensitivity_model: static     # the scalar that "lies" at large excursion
+  spectrum_method: fft
+seed: 7
+output:
+  save: true
