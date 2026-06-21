@@ -26,6 +26,7 @@ from optivibe.dsp.iso import iso_assessment
 from optivibe.dsp.kinematics import INTEGRATOR_REGISTRY
 from optivibe.dsp.metrics import band_rms_velocity, rms, second_harmonic_ratio
 from optivibe.dsp.nea import nea_from_detector
+from optivibe.dsp.sensitivity import build_sensitivity_model
 from optivibe.dsp.spectra import amplitude_spectrum, dominant_frequencies, welch_psd
 from optivibe.mechanics.cantilever import CantileverModel
 
@@ -76,9 +77,13 @@ class StandardDsp:
         """
         fs = detector.fs
 
-        # 1. Calibration: detector samples -> acceleration (signed s_target).
-        accel, _s_target = calibrate_acceleration(detector, variant, self._constants)
-        if options.deconvolve_hlat:
+        # 1. Calibration: detector samples -> acceleration through the selected
+        #    sensitivity model (SW-33 axis B; defaults reproduce v1 exactly).
+        model = build_sensitivity_model(variant, options, self._constants)
+        accel, _s_target = calibrate_acceleration(detector, variant, self._constants, model=model)
+        # Axis C: roll up the plateau by D(f) near f1 (legacy deconvolve_hlat flag
+        # or sensitivity_freq="dynamic" — same correction; default plateau = no-op).
+        if options.deconvolve_hlat or options.sensitivity_freq == "dynamic":
             accel = self._deconvolve_hlat(accel, fs, variant)
 
         # 2. Kinematics: a -> v -> x with drift suppression below f_hp.

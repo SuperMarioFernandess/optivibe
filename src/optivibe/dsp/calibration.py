@@ -45,6 +45,8 @@ canonical ``I_AC`` (the pedestal ``R1`` lives in ``I_DC``, not in ``I_AC``);
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 import numpy.typing as npt
 
@@ -54,6 +56,9 @@ from optivibe.core.types import DetectorOutput, FloatArray
 from optivibe.detector.photodiode import signal_multiplier
 from optivibe.mechanics.cantilever import CantileverModel
 from optivibe.optics.cylinder import CylinderOpticsModel
+
+if TYPE_CHECKING:  # pragma: no cover - typing only (avoids the sensitivity import cycle)
+    from optivibe.dsp.sensitivity import SensitivityModel
 
 ComplexArray = npt.NDArray[np.complex128]
 
@@ -218,13 +223,20 @@ def calibrate_acceleration(
     detector: DetectorOutput,
     variant: VariantConfig,
     constants: Constants | None = None,
+    *,
+    model: SensitivityModel | None = None,
 ) -> tuple[FloatArray, float]:
     """Calibrate detector samples to target-axis acceleration, m/s^2 (doc 05 §2).
 
-    Divides the recovered AC photocurrent by the signed plateau sensitivity
-    ``s_target^QS``. Valid on the off-resonance plateau (``f << f1``, the
-    documented operating mode R-21); near ``f1`` use the ``|H_lat(f)|``
-    deconvolution.
+    Recovers the AC photocurrent and turns it into acceleration through a
+    sensitivity *model* (task S6 §A, decision SW-33). When ``model`` is ``None``
+    the v1 path is used unchanged -- divide by the signed plateau scalar
+    ``s_target^QS`` :func:`target_sensitivity` -- so the default is bit-identical
+    to S5. A model lets the caller switch the operating-point binding (static /
+    operating-point / non-linear-curve) without changing this signature.
+
+    Valid on the off-resonance plateau (``f << f1``, the documented operating mode
+    R-21); near ``f1`` use the ``|H_lat(f)|`` deconvolution (axis C).
 
     Parameters
     ----------
@@ -234,6 +246,9 @@ def calibrate_acceleration(
         Sensor variant.
     constants : Constants or None, optional
         Physical constants (default loaded when ``None``).
+    model : SensitivityModel or None, optional
+        Operating-point binding strategy (axis B). ``None`` selects the v1
+        static-plateau behaviour.
 
     Returns
     -------
@@ -243,10 +258,13 @@ def calibrate_acceleration(
         The signed plateau sensitivity used, A/(m/s^2).
     """
     consts = _resolve_constants(constants)
-    s_target = target_sensitivity(variant, consts)
     i_ac = detector_ac_current(detector, variant)
-    accel: FloatArray = i_ac / s_target
-    return np.ascontiguousarray(accel, dtype=np.float64), s_target
+    if model is None:
+        s_target = target_sensitivity(variant, consts)
+        accel: FloatArray = i_ac / s_target
+        return np.ascontiguousarray(accel, dtype=np.float64), s_target
+    recovered = model.recover_acceleration(i_ac, detector.fs)
+    return np.ascontiguousarray(recovered, dtype=np.float64), model.plateau_value
 
 
 def bench_sensitivity(

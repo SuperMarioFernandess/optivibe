@@ -538,12 +538,24 @@ class DspOptions(_Frozen):
     welch_noverlap : int or None
         Welch segment overlap; ``None`` uses ``nperseg // 2``.
     calibration : {"ideal", "bench"}
-        Calibration source (S5 §1): ``"ideal"`` computes ``s_target`` from the
-        config and the S3/S2 models (known exactly, the v1 default); ``"bench"``
-        is the stand-estimated sensitivity (helper for S6).
+        Calibration source (S5 §1, SW-33 axis A): ``"ideal"`` computes
+        ``s_target`` from the config and the S3/S2 models (known exactly, the v1
+        default); ``"bench"`` is the stand-estimated sensitivity (helper for S6;
+        live-pipeline bench is deferred, 14 §8).
+    sensitivity_model : {"static", "operating_point", "nonlinear_curve"}
+        Operating-point binding strategy (SW-33 axis B; key into
+        ``optivibe.dsp.sensitivity.SENSITIVITY_REGISTRY``). ``"static"`` (the v1
+        default) is the scalar at the nominal bias; ``"operating_point"``
+        recomputes ``s_target`` at the SNR-optimum bias (0.37 rule);
+        ``"nonlinear_curve"`` inverts ``eta(dx)`` point-wise for the >50 g study.
+    sensitivity_freq : {"plateau", "dynamic"}
+        Frequency treatment of the sensitivity (SW-33 axis C): ``"plateau"`` (the
+        v1 default) uses the QS scalar; ``"dynamic"`` rolls it up by ``D(f)`` near
+        ``f1`` (applied via the ``deconvolve_hlat`` mechanism).
     deconvolve_hlat : bool
         Whether to divide out ``|H_lat(f)|`` to approach ``f1`` (S5 §1); the
         default ``False`` uses the flat plateau scalar (the off-resonance mode).
+        ``sensitivity_freq="dynamic"`` enables the same correction.
     iso_machine_class : str
         ISO 10816-3 machine class for the severity assessment (key into
         ``optivibe.dsp.iso.ISO_10816_3_ZONES``; default ``"group2_rigid"``).
@@ -556,6 +568,8 @@ class DspOptions(_Frozen):
     welch_nperseg: int | None = Field(default=None, gt=0, description="Welch segment length")
     welch_noverlap: int | None = Field(default=None, ge=0, description="Welch segment overlap")
     calibration: Literal["ideal", "bench"] = "ideal"
+    sensitivity_model: Literal["static", "operating_point", "nonlinear_curve"] = "static"
+    sensitivity_freq: Literal["plateau", "dynamic"] = "plateau"
     deconvolve_hlat: bool = False
     iso_machine_class: str = "group2_rigid"
 
