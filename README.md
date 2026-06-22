@@ -10,10 +10,14 @@ This repository is the **software** of the project; the physics and interface
 contracts live in the knowledge-base documents (00–13). The architecture is
 specified in document 09 and the coding conventions in document 10.
 
-> **Status: S0 — architectural skeleton.** The package installs, the pipeline
-> runs end to end head-less, and the GUI launches; the *physics* stages
-> (mechanics, optics, detector noise, calibrated DSP) are deliberate stubs that
-> later stages (S1–S8) replace behind the same contracts.
+> **Status: S6 published; S7 desktop app.** The package installs, the forward +
+> inverse pipeline and the analytics (truth-vs-recovery, NEA budget, parameter
+> sweeps, tolerance Monte-Carlo) run end to end head-less, and the **desktop
+> application** drives the same core off the UI thread with live plots and
+> embedded report figures. The physics stages (modal mechanics, Gaussian-beam
+> cylinder optics, photodiode noise, calibrated DSP + switchable sensitivity)
+> are implemented behind frozen contracts; the stubs remain registered for
+> regression.
 
 ## Install
 
@@ -36,11 +40,47 @@ Head-less scenario runner (the S0 acceptance command):
 optivibe run examples/hello.yaml
 ```
 
-Desktop GUI (requires the `gui` extra):
+Analysis report and parameter sweeps (head-less):
+
+```bash
+optivibe report examples/recover_sine.yaml          # truth-vs-recovery + NEA budget
+optivibe sweep  examples/nea_vs_L.yaml --out out/L  # design sweep, npz + figure
+```
+
+## Desktop application
+
+The desktop app (`optivibe-gui`, requires the `gui` extra) is a **thin shell over
+the same core** — it builds a scenario, runs it *off the UI thread*, and renders
+the result. It contains no physics or DSP of its own.
 
 ```bash
 optivibe-gui
 ```
+
+Workflow:
+
+1. **Control panel (left).** Pick a sensor variant (A/B/C/D), build the
+   excitation (`sine` / `multitone` / `sweep` / `random` / `shock`, or replay a
+   CSV/WAV file), and flip the physics layers to demonstrate them: optics
+   `cylinder` ↔ `stub`, detector `photodiode` ↔ `stub` (with the balanced
+   channel and reference-arm convention), DSP `standard` ↔ `stub` (with the
+   sensitivity model and integrator), plus the random seed. The defaults are the
+   `recover_sine` preset, so the first **Run** shows a faithful recovery.
+2. **Run / Report.** *Run* executes the forward + inverse pipeline on a worker
+   thread and fills the **Live** tab (a bending-cantilever animation driven by
+   the first mode shape, the input-vs-recovered acceleration, the detector
+   signal, the recovered velocity/displacement and spectrum). *Report* adds the
+   analysis: the **Report** tab shows the truth-vs-recovery a/v/x overlay, the
+   NEA budget with its shot/RIN/Johnson split, the spectrogram and the error
+   budget; the Live tab's NEA(f) panel fills in.
+3. **Sweeps / Monte-Carlo.** The **Sweeps** tab runs a design or response
+   parameter sweep; the **Monte-Carlo** tab runs a tolerance Monte-Carlo. Both
+   render the corresponding `viz` figure.
+4. **Cancel / Export.** A running job can be cancelled (its result is dropped);
+   **Export** writes the current figures (PNG) and result (`.npz`) to a folder.
+
+The heavy work always runs on a background `QThread` (the GUI thread never
+computes); the same runs are reachable head-less through `optivibe` (parity).
 
 ## Layout
 
