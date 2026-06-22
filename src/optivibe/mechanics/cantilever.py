@@ -28,6 +28,7 @@ __all__ = [
     "CantileverModel",
     "axial_qs_compliance",
     "first_mode_hz",
+    "first_mode_shape",
     "lateral_qs_compliance",
     "second_mode_hz",
     "tilt_coupling_per_m",
@@ -164,6 +165,49 @@ def axial_qs_compliance(constants: Constants, length_m: float) -> float:
         raise ValueError(msg)
     fiber = constants.fiber
     return fiber.density_kg_m3 * length_m**2 / (2.0 * fiber.youngs_modulus_pa)
+
+
+def first_mode_shape(xi: npt.ArrayLike, beta1_l: float) -> FloatArray:
+    """Return the normalized first cantilever mode ``phi_1(xi) / phi_1(1)``.
+
+    The Euler-Bernoulli clamped-free eigenfunction (doc 02 §2)
+    ``phi(s) = cosh(b s) - cos(b s) - sigma (sinh(b s) - sin(b s))`` with
+    ``b = beta1_l`` and ``sigma = (cosh b + cos b) / (sinh b + sin b)``, rescaled
+    so the tip value is 1. By construction the tip slope (in units of ``1/L``)
+    equals the rigid coupling ``phi_1'(1) / phi_1(1) = 1.377`` (doc 04 §2): a tip
+    deflection ``dx`` drawn as ``dx * phi(z / L)`` therefore carries the matching
+    tip tilt ``theta_y = 1.377 dx / L`` for free. This is pure geometry -- the
+    GUI scales this unit shape by the tip displacement of a
+    :class:`~optivibe.core.types.TipState` to animate the bend, so no physics is
+    computed in the view (task S7; SW-09).
+
+    Parameters
+    ----------
+    xi : array_like
+        Normalized arc-length ``z / L`` in ``[0, 1]`` (clamp at 0, tip at 1).
+    beta1_l : float
+        First eigenvalue ``beta_1 * L`` (doc 01 §4.3, ``1.8751``); pass
+        ``constants.universal.beta1_l`` rather than hard-coding it.
+
+    Returns
+    -------
+    numpy.ndarray
+        Mode shape with ``phi(0) = 0`` and ``phi(1) = 1``, dimensionless.
+
+    Raises
+    ------
+    ValueError
+        If ``beta1_l`` is not positive.
+    """
+    if beta1_l <= 0.0:
+        msg = f"beta1_l must be positive, got {beta1_l!r}"
+        raise ValueError(msg)
+    s = np.ascontiguousarray(xi, dtype=np.float64)
+    b = beta1_l
+    sigma = (math.cosh(b) + math.cos(b)) / (math.sinh(b) + math.sin(b))
+    phi = np.cosh(b * s) - np.cos(b * s) - sigma * (np.sinh(b * s) - np.sin(b * s))
+    tip = math.cosh(b) - math.cos(b) - sigma * (math.sinh(b) - math.sin(b))
+    return np.ascontiguousarray(phi / tip, dtype=np.float64)
 
 
 def tilt_coupling_per_m(constants: Constants, length_m: float) -> float:

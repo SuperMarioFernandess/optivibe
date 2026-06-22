@@ -23,6 +23,7 @@ from optivibe.mechanics import (
     ModalTimeMechanics,
     axial_qs_compliance,
     first_mode_hz,
+    first_mode_shape,
     lateral_qs_compliance,
     second_mode_hz,
 )
@@ -374,3 +375,35 @@ def test_property_seed_invariance(seed: int) -> None:
 def _repo_configs() -> Path:
     """Repository configs/ for the hypothesis tests (fixtures unavailable there)."""
     return Path(__file__).resolve().parents[1] / "configs"
+
+
+@pytest.mark.golden
+def test_first_mode_shape_boundary_and_tip_slope() -> None:
+    """phi_1(0)=0, phi_1(1)=1 and the tip slope is the 1.377 coupling (docs 02/04)."""
+    constants = load_constants(_repo_configs() / "constants.yaml")
+    beta1_l = constants.universal.beta1_l
+    xi = np.linspace(0.0, 1.0, 4001)
+    phi = first_mode_shape(xi, beta1_l)
+
+    # Clamped root, unit tip.
+    assert phi[0] == pytest.approx(0.0, abs=1e-12)
+    assert phi[-1] == pytest.approx(1.0, rel=1e-9)
+    # Monotonic and within [0, 1] on the cantilever.
+    assert float(phi.max()) == pytest.approx(1.0, rel=1e-9)
+    assert np.all(np.diff(phi) >= -1e-9)
+
+    # Tip slope (in xi units) equals phi_1'(1)/phi_1(1) = 1.377 (the rigid
+    # tilt-displacement coupling of doc 04 §2): a finite-difference check.
+    slope_tip = (phi[-1] - phi[-2]) / (xi[-1] - xi[-2])
+    expected = constants.tilt_displacement_coupling_per_l
+    assert slope_tip == pytest.approx(expected, rel=2e-3)
+
+    # The raw (un-normalized) eigenfunction has phi_1(1)=2.000 (doc 02 §2): the
+    # normalization divides by exactly that, so phi_tip == 2 * phi_normalized_tip.
+    assert constants.universal.phi1_at_tip == pytest.approx(2.0, rel=1e-3)
+
+
+def test_first_mode_shape_rejects_nonpositive_beta() -> None:
+    """A non-positive eigenvalue is a loud error (no silent NaN)."""
+    with pytest.raises(ValueError, match="beta1_l must be positive"):
+        first_mode_shape(np.linspace(0.0, 1.0, 5), 0.0)
