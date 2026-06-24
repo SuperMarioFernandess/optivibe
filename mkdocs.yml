@@ -22,7 +22,11 @@ plugins:
 
 nav:
   - Home: index.md
+  - User guide: user-guide.md
+  - Importing measured data: data-import.md
+  - Physics → code map: physics-map.md
   - Architecture: architecture.md
+  - Packaging: packaging.md
   - API reference: reference.md
 
 markdown_extensions:

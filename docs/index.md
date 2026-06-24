@@ -13,15 +13,23 @@ documents (00–13). This site documents the **software**: its architecture
 ## Quick start
 
 ```bash
-uv venv
-uv pip install -e ".[dev]"
+uv sync                       # core
+uv sync --extra gui           # + desktop app  (optivibe-gui)
+uv sync --extra io-formats    # + TDMS/UFF/MAT/HDF5 replay
 optivibe run examples/hello.yaml
 ```
 
 ## Where to look
 
+- **User guide** — the CLI, the desktop app, and replaying measured records. See
+  [User guide](user-guide.md).
+- **Importing measured data** — the instrument-format loaders and how units map
+  to SI. See [Importing measured data](data-import.md).
+- **Physics → code map** — which module implements each knowledge-base document.
+  See [Physics → code map](physics-map.md).
 - **Architecture** — the layered design, the registry/ports pattern, the data
   contracts and the GUI threading model. See [Architecture](architecture.md).
+- **Packaging** — building the desktop app bundle. See [Packaging](packaging.md).
 - **API reference** — the modules, contracts and stages, generated from the
   numpy-style docstrings. See [API reference](reference.md).
 

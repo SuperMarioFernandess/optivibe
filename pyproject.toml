@@ -47,6 +47,19 @@ docs = [
     "mkdocs-material>=9.5",
     "mkdocstrings[python]>=0.25",
 ]
+# Instrument-capture loaders (seam SW-08): read measured records from common
+# acquisition formats. Optional so the physics core installs without them; each
+# loader imports its backend lazily and points here if it is missing.
+io-formats = [
+    "nptdms>=1.9",
+    "pyuff>=2.4",
+    "h5py>=3.10",
+]
+# Desktop-app packaging (task S8): bundle the GUI into a self-contained
+# distributable. PyInstaller is the most battle-tested route for PySide6 apps.
+packaging = [
+    "pyinstaller>=6.6",
+]
 
 [project.scripts]
 optivibe = "optivibe.cli.main:main"
@@ -102,6 +115,9 @@ module = [
     "scipy.*",
     "pyqtgraph.*",
     "PySide6.*",
+    "nptdms.*",
+    "pyuff.*",
+    "h5py.*",
 ]
 ignore_missing_imports = true
 

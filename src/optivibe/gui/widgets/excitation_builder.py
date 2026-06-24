@@ -1,8 +1,9 @@
 """Excitation builder widget: the S1 ``ExcitationSpec`` union (task S7 §2).
 
 A ``kind`` selector over a stacked form (sine / multitone / sweep / random /
-shock, plus CSV / WAV replay via the loader registry). It collects a *payload*
-mapping that :func:`optivibe.gui.controllers.scenario_builder.build_excitation_spec`
+shock, plus CSV / WAV / TDMS / UFF / MAT / HDF5 replay via the loader registry).
+It collects a *payload* mapping that
+:func:`optivibe.gui.controllers.scenario_builder.build_excitation_spec`
 validates -- the widget holds no signal logic, only the input fields (09 §9).
 """
 
@@ -27,7 +28,19 @@ from PySide6.QtWidgets import (
 
 __all__ = ["ExcitationBuilder"]
 
-_KINDS = ("sine", "multitone", "sweep", "random", "shock", "csv", "wav")
+_KINDS = (
+    "sine",
+    "multitone",
+    "sweep",
+    "random",
+    "shock",
+    "csv",
+    "wav",
+    "tdms",
+    "uff",
+    "mat",
+    "hdf5",
+)
 _GENERATED = {"sine", "multitone", "sweep", "random", "shock"}
 
 
@@ -202,6 +215,107 @@ class ExcitationBuilder(QWidget):
             )
         )
 
+        # tdms (NI TDMS; fs from wf_increment when "fs [Hz]" is 0)
+        self._tdms_path = QLineEdit()
+        tdms_browse = QPushButton("Browse...")
+        tdms_browse.clicked.connect(lambda: self._browse(self._tdms_path, "TDMS (*.tdms)"))
+        self._tdms_group = QLineEdit()
+        self._tdms_group.setPlaceholderText("(first group)")
+        self._tdms_channel = QSpinBox()
+        self._tdms_channel.setRange(0, 256)
+        self._tdms_fs = _spin(0.0, 2.0e6, 0.0, decimals=1, step=100.0)
+        self._tdms_units = QComboBox()
+        self._tdms_units.addItems(("m/s^2", "g"))
+        tdms_row = QHBoxLayout()
+        tdms_row.addWidget(self._tdms_path, stretch=1)
+        tdms_row.addWidget(tdms_browse)
+        self._stack.addWidget(
+            self._form(
+                [
+                    ("path", self._wrap(tdms_row)),
+                    ("group", self._tdms_group),
+                    ("channel", self._tdms_channel),
+                    ("fs [Hz] (0=file)", self._tdms_fs),
+                    ("units", self._tdms_units),
+                ]
+            )
+        )
+
+        # uff (UFF/UNV dataset-58; fs from abscissa_inc when "fs [Hz]" is 0)
+        self._uff_path = QLineEdit()
+        uff_browse = QPushButton("Browse...")
+        uff_browse.clicked.connect(lambda: self._browse(self._uff_path, "UFF (*.uff *.unv)"))
+        self._uff_index = QSpinBox()
+        self._uff_index.setRange(0, 4096)
+        self._uff_fs = _spin(0.0, 2.0e6, 0.0, decimals=1, step=100.0)
+        self._uff_units = QComboBox()
+        self._uff_units.addItems(("m/s^2", "g"))
+        uff_row = QHBoxLayout()
+        uff_row.addWidget(self._uff_path, stretch=1)
+        uff_row.addWidget(uff_browse)
+        self._stack.addWidget(
+            self._form(
+                [
+                    ("path", self._wrap(uff_row)),
+                    ("dataset index", self._uff_index),
+                    ("fs [Hz] (0=file)", self._uff_fs),
+                    ("units", self._uff_units),
+                ]
+            )
+        )
+
+        # mat (MATLAB v4/v5/v7; fs required)
+        self._mat_path = QLineEdit()
+        mat_browse = QPushButton("Browse...")
+        mat_browse.clicked.connect(lambda: self._browse(self._mat_path, "MAT (*.mat)"))
+        self._mat_key = QLineEdit()
+        self._mat_key.setPlaceholderText("variable name")
+        self._mat_column = QSpinBox()
+        self._mat_column.setRange(0, 256)
+        self._mat_fs = _spin(0.1, 2.0e6, 5000.0, decimals=1, step=100.0)
+        self._mat_units = QComboBox()
+        self._mat_units.addItems(("m/s^2", "g"))
+        mat_row = QHBoxLayout()
+        mat_row.addWidget(self._mat_path, stretch=1)
+        mat_row.addWidget(mat_browse)
+        self._stack.addWidget(
+            self._form(
+                [
+                    ("path", self._wrap(mat_row)),
+                    ("data key", self._mat_key),
+                    ("column", self._mat_column),
+                    ("fs [Hz]", self._mat_fs),
+                    ("units", self._mat_units),
+                ]
+            )
+        )
+
+        # hdf5 (.h5/.hdf5; fs required)
+        self._hdf5_path = QLineEdit()
+        hdf5_browse = QPushButton("Browse...")
+        hdf5_browse.clicked.connect(lambda: self._browse(self._hdf5_path, "HDF5 (*.h5 *.hdf5)"))
+        self._hdf5_dataset = QLineEdit()
+        self._hdf5_dataset.setPlaceholderText("/accel/x")
+        self._hdf5_column = QSpinBox()
+        self._hdf5_column.setRange(0, 256)
+        self._hdf5_fs = _spin(0.1, 2.0e6, 5000.0, decimals=1, step=100.0)
+        self._hdf5_units = QComboBox()
+        self._hdf5_units.addItems(("m/s^2", "g"))
+        hdf5_row = QHBoxLayout()
+        hdf5_row.addWidget(self._hdf5_path, stretch=1)
+        hdf5_row.addWidget(hdf5_browse)
+        self._stack.addWidget(
+            self._form(
+                [
+                    ("path", self._wrap(hdf5_row)),
+                    ("dataset", self._hdf5_dataset),
+                    ("column", self._hdf5_column),
+                    ("fs [Hz]", self._hdf5_fs),
+                    ("units", self._hdf5_units),
+                ]
+            )
+        )
+
     @staticmethod
     def _form(rows: list[tuple[str, QWidget]]) -> QWidget:
         """Build a form-layout page from (label, widget) rows."""
@@ -270,4 +384,31 @@ class ExcitationBuilder(QWidget):
             base["path"] = self._wav_path.text().strip()
             base["channel"] = self._wav_channel.value()
             base["full_scale_g"] = self._wav_fs_g.value()
+        elif kind == "tdms":
+            base["path"] = self._tdms_path.text().strip()
+            group = self._tdms_group.text().strip()
+            if group:
+                base["group"] = group
+            base["channel"] = self._tdms_channel.value()
+            if self._tdms_fs.value() > 0.0:
+                base["fs_hz"] = self._tdms_fs.value()
+            base["units"] = self._tdms_units.currentText()
+        elif kind == "uff":
+            base["path"] = self._uff_path.text().strip()
+            base["dataset_index"] = self._uff_index.value()
+            if self._uff_fs.value() > 0.0:
+                base["fs_hz"] = self._uff_fs.value()
+            base["units"] = self._uff_units.currentText()
+        elif kind == "mat":
+            base["path"] = self._mat_path.text().strip()
+            base["data_key"] = self._mat_key.text().strip()
+            base["column"] = self._mat_column.value()
+            base["fs_hz"] = self._mat_fs.value()
+            base["units"] = self._mat_units.currentText()
+        elif kind == "hdf5":
+            base["path"] = self._hdf5_path.text().strip()
+            base["dataset"] = self._hdf5_dataset.text().strip()
+            base["column"] = self._hdf5_column.value()
+            base["fs_hz"] = self._hdf5_fs.value()
+            base["units"] = self._hdf5_units.currentText()
         return base

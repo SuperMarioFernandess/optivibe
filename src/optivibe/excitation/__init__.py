@@ -3,11 +3,12 @@
 S1 implements the full generator family of doc 11 §2.1 behind the
 :class:`~optivibe.core.stages.ExcitationSource` protocol — sine, multitone,
 sweep/chirp, band-limited random noise with target PSD/RMS, half-sine shock —
-plus replay of measured CSV/WAV records through the data-loader registry
-(seam SW-08). Each implementation is registered under its spec ``kind``, so a
-scenario selects it with ``stages.excitation: <kind>`` (SW-02). Input range of
-the project spec (doc 00): 0.1g-50g anywhere in 0.1 Hz-20 kHz; behaviour above
-50g is itself a study subject, so amplitudes are not clamped here.
+plus replay of measured CSV/WAV records and instrument captures (TDMS/UFF/MAT/
+HDF5) through the data-loader registry (seam SW-08). Each implementation is
+registered under its spec ``kind``, so a scenario selects it with
+``stages.excitation: <kind>`` (SW-02). Input range of the project spec (doc 00):
+0.1g-50g anywhere in 0.1 Hz-20 kHz; behaviour above 50g is itself a study
+subject, so amplitudes are not clamped here.
 """
 
 from __future__ import annotations
@@ -29,6 +30,10 @@ EXCITATION_REGISTRY.register("random")(RandomExcitationSource)
 EXCITATION_REGISTRY.register("shock")(ShockExcitationSource)
 EXCITATION_REGISTRY.register("csv")(FileExcitationSource)
 EXCITATION_REGISTRY.register("wav")(FileExcitationSource)
+EXCITATION_REGISTRY.register("tdms")(FileExcitationSource)
+EXCITATION_REGISTRY.register("uff")(FileExcitationSource)
+EXCITATION_REGISTRY.register("mat")(FileExcitationSource)
+EXCITATION_REGISTRY.register("hdf5")(FileExcitationSource)
 
 __all__ = [
     "EXCITATION_REGISTRY",

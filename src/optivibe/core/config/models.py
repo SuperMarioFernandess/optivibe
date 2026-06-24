@@ -502,15 +502,156 @@ class WavSpec(_ExcitationBase):
     resample_hz: float | None = Field(default=None, gt=0.0, description="Target rate, Hz")
 
 
+class _InstrumentBase(_ExcitationBase):
+    """Fields shared by instrument-format replay specs (TDMS/UFF/MAT/HDF5, S8).
+
+    These formats carry their own sampling metadata, so ``fs`` is read from the
+    file (each subclass documents its source) unless overridden. ``units``
+    selects how the stored channel maps onto acceleration in SI: ``"g"`` and
+    ``"m/s^2"`` are engineering units; ``"V"`` is a raw voltage that needs an
+    accelerometer ``sensitivity`` to become acceleration; ``"auto"`` reads the
+    unit label embedded in the file and fails loudly if it is missing or
+    unrecognized (10 §7). The actual conversion happens in the loader, at the
+    input boundary (10 §6).
+    """
+
+    units: Literal["g", "m/s^2", "V", "auto"] = Field(
+        default="m/s^2",
+        description="Stored channel unit; 'auto' reads the file's unit label",
+    )
+    sensitivity: float | None = Field(
+        default=None,
+        gt=0.0,
+        description="Accelerometer sensitivity (required only for voltage records)",
+    )
+    sensitivity_unit: Literal["mV/g", "V/g", "mV/(m/s^2)", "V/(m/s^2)"] = Field(
+        default="mV/g", description="Units of `sensitivity` (voltage records only)"
+    )
+    resample_hz: float | None = Field(
+        default=None, gt=0.0, description="Target sampling rate, Hz (polyphase resample)"
+    )
+
+
+class TdmsSpec(_InstrumentBase):
+    """Replay of a measured record from an NI TDMS file (seam SW-08, S8).
+
+    The sampling rate is taken from the channel's ``wf_increment`` waveform
+    property unless ``fs_hz`` is set; ``units="auto"`` reads the channel's
+    ``unit_string`` property.
+    """
+
+    kind: Literal["tdms"] = "tdms"
+    path: str = Field(description="Path to the .tdms file")
+    group: str | None = Field(
+        default=None, description="TDMS group name (the first group is used if None)"
+    )
+    channel: int | str = Field(
+        default=0, description="Channel within the group: 0-based index or channel name"
+    )
+    fs_hz: float | None = Field(
+        default=None, gt=0.0, description="Sampling rate, Hz (from wf_increment if None)"
+    )
+
+
+class UffSpec(_InstrumentBase):
+    """Replay of a measured record from a UFF/UNV dataset-58 file (S8).
+
+    The sampling rate is taken from the function's ``abscissa_inc`` (the even
+    abscissa step) unless ``fs_hz`` is set; ``units="auto"`` reads the
+    ordinate's unit label.
+    """
+
+    kind: Literal["uff"] = "uff"
+    path: str = Field(description="Path to the .uff/.unv file")
+    dataset_index: int = Field(
+        default=0, ge=0, description="Which dataset-58 record to read (0-based among them)"
+    )
+    fs_hz: float | None = Field(
+        default=None, gt=0.0, description="Sampling rate, Hz (from abscissa_inc if None)"
+    )
+
+
+class MatSpec(_InstrumentBase):
+    """Replay of a measured record from a MATLAB .mat file (v4/v5/v7; S8).
+
+    A v7.3 ``.mat`` file is HDF5-based and is not read here -- use the ``hdf5``
+    loader (or re-save as v7). The acceleration array lives in the variable
+    ``data_key``; a 2-D array selects a channel with ``column``. MAT files carry
+    no standard unit label, so ``units`` must be explicit (``"auto"`` is
+    rejected).
+    """
+
+    kind: Literal["mat"] = "mat"
+    path: str = Field(description="Path to the .mat file (v7.3 -> use the hdf5 loader)")
+    data_key: str = Field(description="Name of the variable holding the acceleration array")
+    column: int | None = Field(
+        default=None, ge=0, description="Column to read for 2-D data (the first if None)"
+    )
+    fs_hz: float | None = Field(default=None, gt=0.0, description="Sampling rate, Hz")
+    fs_key: str | None = Field(
+        default=None, description="Name of a variable holding the scalar sampling rate"
+    )
+
+    @model_validator(mode="after")
+    def _check_rate(self) -> MatSpec:
+        if self.fs_hz is None and self.fs_key is None:
+            msg = "mat excitation needs either fs_hz or fs_key"
+            raise ValueError(msg)
+        return self
+
+
+class Hdf5Spec(_InstrumentBase):
+    """Replay of a measured record from an HDF5 (.h5/.hdf5) file (S8).
+
+    The signal lives at the dataset path ``dataset``; a 2-D dataset selects a
+    channel with ``column``. The sampling rate comes from ``fs_hz`` or from the
+    dataset attribute named by ``fs_attr``; ``units="auto"`` reads the unit
+    string from the attribute named by ``units_attr``.
+    """
+
+    kind: Literal["hdf5"] = "hdf5"
+    path: str = Field(description="Path to the .h5/.hdf5 file")
+    dataset: str = Field(description="Path of the dataset inside the file (e.g. '/accel/x')")
+    column: int | None = Field(
+        default=None, ge=0, description="Column to read for 2-D data (the first if None)"
+    )
+    fs_hz: float | None = Field(default=None, gt=0.0, description="Sampling rate, Hz")
+    fs_attr: str | None = Field(
+        default=None, description="Dataset attribute holding the scalar sampling rate"
+    )
+    units_attr: str | None = Field(
+        default=None, description="Dataset attribute holding the unit string (for units='auto')"
+    )
+
+    @model_validator(mode="after")
+    def _check_rate(self) -> Hdf5Spec:
+        if self.fs_hz is None and self.fs_attr is None:
+            msg = "hdf5 excitation needs either fs_hz or fs_attr"
+            raise ValueError(msg)
+        return self
+
+
 ExcitationSpec = Annotated[
-    SineSpec | MultitoneSpec | SweepSpec | RandomSpec | ShockSpec | CsvSpec | WavSpec,
+    SineSpec
+    | MultitoneSpec
+    | SweepSpec
+    | RandomSpec
+    | ShockSpec
+    | CsvSpec
+    | WavSpec
+    | TdmsSpec
+    | UffSpec
+    | MatSpec
+    | Hdf5Spec,
     Field(discriminator="kind"),
 ]
-"""Discriminated union of all excitation specs, selected by ``kind`` (S1).
+"""Discriminated union of all excitation specs, selected by ``kind``.
 
 The S0 form ``ExcitationSpec(kind="sine", ...)`` maps one-to-one onto
 :class:`SineSpec`, so existing scenarios (``examples/hello.yaml``) parse
-unchanged.
+unchanged. S1 added CSV/WAV replay; S8 adds the instrument formats
+(:class:`TdmsSpec`, :class:`UffSpec`, :class:`MatSpec`, :class:`Hdf5Spec`)
+behind the same loader registry (seam SW-08).
 """
 
 

@@ -123,5 +123,5 @@ def test_file_excitation_source_dispatches_by_kind(tmp_path: Path) -> None:
     exc = EXCITATION_REGISTRY.create("csv").generate(spec, seed=11)
     assert exc.seed == 11
     sine = SineSpec(fs_hz=100.0, duration_s=0.1, frequency_hz=10.0, amplitude_g=1.0)
-    with pytest.raises(TypeError, match="CsvSpec or WavSpec"):
+    with pytest.raises(TypeError, match="file-replay spec"):
         EXCITATION_REGISTRY.create("wav").generate(sine)

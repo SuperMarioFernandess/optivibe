@@ -1,0 +1,21 @@
+# TDMS replay example (data seam SW-08, S8) — the same physical record as
+# examples/data/example_accel.csv, stored as an NI TDMS channel. The sampling
+# rate is read from the channel's wf_increment and the unit label ("g") is read
+# from the file because units is set to "auto"; the loader converts to SI.
+# Needs the optional extra:  pip install 'optivibe[io-formats]'
+# Run from the repo root:  optivibe run examples/replay_tdms.yaml
+name: replay-tdms-demo
+variant: B
+
+excitation:
+  kind: tdms
+  axis: x
+  path: examples/data/example_accel.tdms   # relative to the current working directory
+  group: accel        # optional; the first group is used if omitted
+  channel: x          # 0-based index or channel name
+  units: auto         # read the unit label from the file (here: "g")
+
+stages:
+  excitation: tdms
+
+seed: 12345

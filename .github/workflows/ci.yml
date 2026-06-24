@@ -9,8 +9,12 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Action majors are pinned to the versions that were green for this repo
+# (checkout@v5, setup-uv@v7, upload-artifact@v4, Pages v3/v4/v5). Re-verify
+# before the Node-20 runtime sunset (GitHub Actions, ~2026-09).
 jobs:
   quality:
+    name: Lint, types, tests (Linux)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -28,29 +32,101 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
-      - name: Create venv and install (core + dev + gui)
-        # The runner's system Python is externally managed (PEP 668, Ubuntu 24.04),
-        # so we install into a project venv instead of using --system.
-        run: |
-          uv venv --python 3.11
-          uv pip install -e ".[dev,gui]"
-
-      - name: Add venv to PATH
-        run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+      - name: Sync locked environment (core + dev + gui + io-formats)
+        # `uv sync --locked` installs the exact versions from uv.lock (notably
+        # numpy 2.4.6): a fresh resolve would pull a newer numpy whose typed
+        # stubs use 3.12-only syntax and break mypy under python 3.11. Pinning
+        # the interpreter to 3.11 matches the mypy target.
+        run: uv sync --locked --python 3.11 --extra dev --extra gui --extra io-formats
 
       - name: Lint (ruff)
-        run: ruff check .
+        run: uv run ruff check .
 
       - name: Format check (ruff)
-        run: ruff format --check .
+        run: uv run ruff format --check .
 
       - name: Type check (mypy)
-        run: mypy
+        run: uv run mypy
 
       - name: Tests + coverage
         env:
           QT_QPA_PLATFORM: offscreen   # headless Qt for the GUI smoke test
-        run: pytest --cov=optivibe --cov-report=term-missing --cov-fail-under=85
+        run: uv run pytest --cov=optivibe --cov-report=term-missing --cov-fail-under=85
 
-      - name: Head-less scenario run
-        run: optivibe run examples/hello.yaml
+      - name: Head-less scenario run (synthetic)
+        run: uv run optivibe run examples/hello.yaml
+
+      - name: Head-less scenario run (instrument replay, io-formats)
+        run: uv run optivibe run examples/replay_tdms.yaml
+
+  package-windows:
+    name: Package desktop app (Windows)
+    needs: quality
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Sync locked environment (gui + io-formats + packaging + dev)
+        run: uv sync --locked --python 3.11 --extra gui --extra io-formats --extra packaging --extra dev
+
+      - name: Core + loader tests (no GUI)
+        # Proves the physics core and the instrument loaders import and pass on
+        # Windows (the packaging target). GUI/Qt tests are excluded here; their
+        # full run lives in the Linux `quality` job under offscreen Qt.
+        run: uv run pytest -m "not gui" -q
+
+      - name: Build one-dir bundle (PyInstaller)
+        run: uv run pyinstaller packaging/optivibe-gui.spec --noconfirm
+
+      # NOTE: a GUI smoke (launch + run a scenario) cannot be automated on a
+      # headless runner; it is a documented manual step (docs/packaging.md).
+      - name: Upload app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: optivibe-gui-windows-${{ github.sha }}
+          path: dist/OptiVibe
+          if-no-files-found: error
+          retention-days: 14
+
+  docs:
+    name: Build & publish docs
+    needs: quality
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Sync locked environment (docs)
+        run: uv sync --locked --python 3.11 --extra docs
+
+      - name: Build site (strict)
+        # --strict turns broken nav/links/refs into a build failure, so docs are
+        # validated on every PR even though only main publishes.
+        run: uv run mkdocs build --strict --site-dir _site
+
+      - name: Configure Pages
+        if: github.ref == 'refs/heads/main'
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        if: github.ref == 'refs/heads/main'
+        uses: actions/deploy-pages@v4
