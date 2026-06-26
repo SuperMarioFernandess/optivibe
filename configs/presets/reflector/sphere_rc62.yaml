@@ -1,0 +1,10 @@
+# Built-in reflector preset: metallized convex SPHERE, R_c = 62.5 um (docs 03/08).
+# Curved in BOTH transverse planes (f = -R_c/2 each) -> isotropic coupling, no
+# directionality: the cross axis is NOT suppressed (doc 03 §c, S9-B). The bias
+# Delta x0 is applied radially (Delta y0 = Delta x0), so d_eta/d_Dx = d_eta/d_Dy.
+# SI units throughout.
+shape: sphere
+curvature_radius_m: 62.5e-6   # R_c, same in both planes (doc 08 §6)
+metallization_rho: 0.98       # mirror reflectivity rho (doc 08 §6)
+gap_m: 31.0e-6                # air gap A (parametric band 20-40 um, doc 03 §6)
+bias_offset_m: 2.0e-6         # radial working-point de-centering Delta x0 = Delta y0 (doc 03 §5)

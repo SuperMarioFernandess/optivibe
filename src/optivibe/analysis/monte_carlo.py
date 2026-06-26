@@ -95,7 +95,7 @@ def _perturbed_variant(
     overrides: dict[str, float] = {}
     if "q_total" in tolerances:
         overrides["q_total"] = max(_draw(rng, base.q_total, tolerances["q_total"]), 1.0)
-    if "radius_of_curvature_m" in tolerances:
+    if "radius_of_curvature_m" in tolerances and base.reflector.radius_of_curvature_m is not None:
         rc = _draw(rng, base.reflector.radius_of_curvature_m, tolerances["radius_of_curvature_m"])
         overrides["radius_of_curvature_m"] = max(rc, 5.05 * w0)  # R_c >= ~5 w0 guard
     if "gap_m" in tolerances:

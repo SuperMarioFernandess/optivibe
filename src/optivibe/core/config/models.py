@@ -135,7 +135,9 @@ class ReflectorConfig(_Frozen):
     """Convex reflector geometry/coating (doc 08 §6; R-12, R-16, R-24)."""
 
     shape: Literal["cylinder", "sphere", "wedge", "plane"] = "cylinder"
-    radius_of_curvature_m: float = Field(gt=0.0, description="Reflector radius R_c, m")
+    radius_of_curvature_m: float | None = Field(
+        default=None, gt=0.0, description="Reflector radius R_c, m (None for plane/wedge)"
+    )
     reflectivity: float = Field(
         gt=0.0, le=1.0, description="Mirror reflectivity rho (0.98 metallized)"
     )
@@ -161,6 +163,11 @@ class OpticsConfig(_Frozen):
         Gaussian mode-field radius w0 of the fiber at the source wavelength, m
         (doc 03 §1: w0 = 5.2 um at 1550 nm for SMF-28). Lives in the variant
         (not in constants.yaml) because it is tied to the source wavelength.
+    wedge_angle_rad : float or None
+        Built-in wedge face-tilt angle alpha_w, rad, for the ``"wedge"`` shape
+        (doc 03 §c). ``None`` for every other shape. A shape parameter that
+        "flows" through the optics block (task S9-B §3) so the resolved
+        ``VariantConfig`` contract gains it without a new reflector field.
     """
 
     gap_m: float = Field(default=31.0e-6, gt=0.0, description="Air gap A, m (doc 03 §6)")
@@ -169,6 +176,10 @@ class OpticsConfig(_Frozen):
     )
     mode_field_radius_m: float = Field(
         default=5.2e-6, gt=0.0, description="Mode-field radius w0, m (doc 03 §1)"
+    )
+    wedge_angle_rad: float | None = Field(
+        default=None,
+        description="Built-in wedge face-tilt angle alpha_w, rad (wedge shape only; doc 03 §c)",
     )
 
 
@@ -794,8 +805,11 @@ class ScenarioConfig(_Frozen):
     ----------
     name : str
         Scenario name.
-    variant : {"A", "B", "C", "D"}
-        Which variant preset to load from ``configs/variants``.
+    variant : {"A", "B", "C", "D", "sphere_demo", "plane_demo", "wedge_demo"}
+        Which variant preset to load from ``configs/variants``. A-D are the
+        canonical sensor variants (doc 08); the ``*_demo`` compositions are the
+        S9-B reflector-family demonstrations (sphere/plane/wedge), wideband
+        platforms identical to B but for the reflector preset.
     excitation : ExcitationSpec
         Input-signal description.
     stages : StageSelection
@@ -813,7 +827,7 @@ class ScenarioConfig(_Frozen):
     """
 
     name: str
-    variant: Literal["A", "B", "C", "D"]
+    variant: Literal["A", "B", "C", "D", "sphere_demo", "plane_demo", "wedge_demo"]
     excitation: ExcitationSpec
     stages: StageSelection = StageSelection()
     mechanics: MechanicsOptions = MechanicsOptions()
