@@ -34,13 +34,14 @@ from dataclasses import dataclass
 import numpy as np
 
 from optivibe.core.config.models import VariantConfig
-from optivibe.core.types import FloatArray, OpticalResponse, TipState
+from optivibe.core.types import FloatArray
 from optivibe.optics.gaussian import (
     GaussianBeam,
     eta_parallel_curved,
     eta_parallel_flat,
     misalignment_factor,
 )
+from optivibe.optics.reflector import ReflectorOptics
 
 __all__ = ["CylinderOptics", "CylinderOpticsModel"]
 
@@ -113,6 +114,9 @@ class CylinderOpticsModel:
             waist_radius_m=variant.optics.mode_field_radius_m,
         )
         radius = variant.reflector.radius_of_curvature_m
+        if radius is None:
+            msg = "cylinder reflector requires a finite radius_of_curvature_m (got None)"
+            raise ValueError(msg)
         gap = variant.optics.gap_m
         if radius < _MIN_RADIUS_PER_WAIST * beam.waist_radius_m:
             msg = (
@@ -342,35 +346,18 @@ class CylinderOpticsModel:
         return self.sigma_m * math.sqrt(-math.log(ratio))
 
 
-class CylinderOptics:
-    """Pipeline stage: TipState -> OpticalResponse via the cylinder model (S3).
+class CylinderOptics(ReflectorOptics):
+    """Back-compat alias of the shape-dispatching optics stage (S3 -> S9-B).
 
-    Registered under the key ``"cylinder"``. The model is built from the
-    variant at each call (pure construction, no I/O); ``OpticalResponse.bias``
-    carries the *computed* working point eta0 (not the stub's ``eta_bias``).
+    Historically (S3) this *was* the cylinder-only stage. Since S9-B the optics
+    stage dispatches by ``reflector.shape`` through
+    :class:`~optivibe.optics.reflector.ReflectorOptics`; ``CylinderOptics`` is
+    kept as a thin subclass so existing imports
+    (``from optivibe.optics.cylinder import CylinderOptics``) and the registry
+    key ``"cylinder"`` keep working unchanged. For a cylinder variant the
+    inherited :meth:`~optivibe.optics.reflector.ReflectorOptics.run` builds the
+    very same :class:`CylinderOpticsModel`, so the output is byte-for-byte the
+    S3 behaviour. The cylinder *model* (:class:`CylinderOpticsModel`) still
+    refuses non-cylinder shapes in :meth:`CylinderOpticsModel.from_config`.
     """
 
-    def run(self, tip: TipState, variant: VariantConfig) -> OpticalResponse:
-        """Compute the coupling response of a tip trajectory.
-
-        Parameters
-        ----------
-        tip : TipState
-            Tip-state time series (m, rad).
-        variant : VariantConfig
-            Sensor variant (reflector, source, optics blocks).
-
-        Returns
-        -------
-        OpticalResponse
-            eta(t) with per-plane factors and the computed working point.
-        """
-        model = CylinderOpticsModel.from_config(variant)
-        eta_x, eta_y = model.eta_components(tip.dx, tip.dy, tip.dz, tip.theta_x, tip.theta_y)
-        return OpticalResponse(
-            eta=eta_x * eta_y,
-            bias=model.eta_working_point(),
-            fs=tip.fs,
-            eta_x=eta_x,
-            eta_y=eta_y,
-        )
