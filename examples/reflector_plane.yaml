@@ -1,0 +1,24 @@
+# Reflector family (S9-B): PLANE reference demo. A flat mirror has NO
+# displacement sensitivity in either axis (d_eta/d_Dx = d_eta/d_Dy = 0;
+# doc 03 §c/§g). A pure transverse drive therefore leaves the coupling almost
+# flat (residual only through the mechanically coupled tilt 2*theta and the
+# tiny defocus), so the optical signal is strongly suppressed relative to the
+# curved cylinder/sphere. Coupling responds to tilt and gap, not to position.
+# Run from the repo root:  optivibe run examples/reflector_plane.yaml
+name: reflector-plane-no-displacement
+variant: plane_demo
+
+excitation:
+  kind: sine
+  axis: x                  # target axis on a curved mirror; here it barely couples
+  fs_hz: 5000.0
+  duration_s: 1.0
+  frequency_hz: 120.0
+  amplitude_g: 10.0
+
+stages:
+  excitation: sine
+  mechanics: modal
+  optics: reflector        # shape-dispatching optics; plane via the variant
+
+seed: 12345
