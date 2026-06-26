@@ -1,0 +1,10 @@
+# Built-in reflector preset: metallized PLANE mirror (R_c -> inf; docs 03/08).
+# The reference limit: no focusing, so NO displacement sensitivity in either
+# axis (d_eta/d_Dx = d_eta/d_Dy = 0, doc 03 §c/§g, S9-B). Coupling is set by
+# tilt (angular walk-off 2*theta) and gap (defocus 1/sqrt(1+(A/zR)^2), both
+# axes). curvature_radius_m is omitted (None) and bias is irrelevant for a flat
+# mirror. SI units throughout.
+shape: plane
+metallization_rho: 0.98       # mirror reflectivity rho (doc 08 §6)
+gap_m: 31.0e-6                # air gap A (doc 03 §6)
+bias_offset_m: 0.0            # ignored by a flat mirror (no displacement coupling)

@@ -24,7 +24,7 @@ from optivibe.core.logging import get_logger
 logger = get_logger(__name__)
 
 _ENV_VAR = "OPTIVIBE_CONFIG_DIR"
-_VALID_VARIANTS = ("A", "B", "C", "D")
+_VALID_VARIANTS = ("A", "B", "C", "D", "sphere_demo", "plane_demo", "wedge_demo")
 
 # Keys that mark a YAML document as a composed SystemConfig rather than a flat
 # VariantConfig. A composition references subsystem presets (``preset`` key) and

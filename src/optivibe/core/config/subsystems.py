@@ -66,16 +66,25 @@ if TYPE_CHECKING:  # avoid importing the heavy resolved model at runtime import 
     from optivibe.core.config.models import VariantConfig
     from optivibe.core.config.presets import PresetStore
 
-# Reflector shapes with a registered optics implementation (doc 03; S3). Only
-# the convex cylinder is implemented today; sphere/plane/wedge are recorded
-# extensions (doc 14 §8, S9-B) and are rejected at composition time.
-REGISTERED_REFLECTOR_SHAPES: frozenset[str] = frozenset({"cylinder"})
+# Reflector shapes with a registered optics implementation (doc 03; S3/S9-B).
+# S9-B added the sphere/plane/wedge family behind the optics shape layer
+# (:mod:`optivibe.optics.reflector`); each maps to a registered model factory in
+# :data:`optivibe.optics.REFLECTOR_MODEL_REGISTRY`. A composition naming any
+# other shape is rejected at composition time.
+REGISTERED_REFLECTOR_SHAPES: frozenset[str] = frozenset(
+    {"cylinder", "sphere", "plane", "wedge"}
+)
 
 # Paraxial validity guards of the cylinder optics (doc 03 §6). Mirrors the
 # runtime constants of :mod:`optivibe.optics.cylinder` so a bad composition
 # fails *early*, at config time, with the same numeric thresholds.
 _MIN_RADIUS_PER_WAIST = 5.0
 _MAX_SPOT_PER_RADIUS = 1.0 / 3.0
+
+# Paraxial range of the built-in wedge angle (doc 03 §6). Mirrors
+# :data:`optivibe.optics.wedge.MAX_WEDGE_ANGLE_RAD` (kept in sync; the config
+# layer does not import the optics layer, see the module note).
+_MAX_WEDGE_ANGLE_RAD = 0.15
 
 
 class _SubsystemBase(BaseModel):
@@ -184,11 +193,14 @@ class ReflectorConfig(_SubsystemBase):
     Attributes
     ----------
     shape : {"cylinder", "sphere", "wedge", "plane"}
-        Reflector profile. Only ``"cylinder"`` has a registered optics model in
-        v1 (:data:`REGISTERED_REFLECTOR_SHAPES`); other values are rejected at
-        composition time (doc 14 §8, S9-B).
-    curvature_radius_m : float
-        Radius of curvature R_c, m (doc 08 §6). Feeds
+        Reflector profile. Each has a registered optics model
+        (:data:`REGISTERED_REFLECTOR_SHAPES`; S9-B): cylinder (1-axis, curved in
+        x), sphere (isotropic, curved in both planes), wedge (tilted plane,
+        angular bias) and plane (the ``R_c -> inf`` reference). Other values are
+        rejected at composition time.
+    curvature_radius_m : float or None
+        Radius of curvature R_c, m (doc 08 §6). Required for cylinder/sphere;
+        ``None`` for the flat plane/wedge (they ignore curvature). Feeds
         ``reflector.radius_of_curvature_m``.
     metallization_rho : float
         Mirror reflectivity rho (doc 08 §6; 0.98 metallized). Feeds
@@ -198,11 +210,19 @@ class ReflectorConfig(_SubsystemBase):
         parametric band 20-40 um). Feeds ``optics.gap_m``.
     bias_offset_m : float
         Intentional static de-centering Delta x0 setting the working point on
-        the slope, m (doc 03 §5). Feeds ``optics.bias_offset_m``.
+        the slope, m (doc 03 §5). Feeds ``optics.bias_offset_m``. Ignored by the
+        flat plane/wedge (no displacement coupling); the sphere applies it
+        radially.
+    wedge_angle_rad : float or None
+        Built-in wedge face-tilt angle alpha_w, rad (doc 03 §c). Required for
+        the wedge, ``None`` otherwise. Feeds ``optics.wedge_angle_rad`` (the
+        shape parameter flows through the optics block, task S9-B §3).
     """
 
     shape: Literal["cylinder", "sphere", "wedge", "plane"] = "cylinder"
-    curvature_radius_m: float = Field(gt=0.0, description="Radius of curvature R_c, m (doc 08 §6)")
+    curvature_radius_m: float | None = Field(
+        default=None, gt=0.0, description="Radius of curvature R_c, m (doc 08 §6; None for plane)"
+    )
     metallization_rho: float = Field(
         gt=0.0, le=1.0, description="Mirror reflectivity rho (doc 08 §6)"
     )
@@ -210,6 +230,31 @@ class ReflectorConfig(_SubsystemBase):
     bias_offset_m: float = Field(
         default=2.0e-6, ge=0.0, description="Working-point de-centering Delta x0, m (doc 03 §5)"
     )
+    wedge_angle_rad: float | None = Field(
+        default=None,
+        description="Built-in wedge face-tilt angle alpha_w, rad (wedge only; doc 03 §c)",
+    )
+
+    @model_validator(mode="after")
+    def _check_shape_params(self) -> ReflectorConfig:
+        """Per-shape parameter requirements, failing loudly on bad configs (10 §7).
+
+        * cylinder / sphere need a finite ``curvature_radius_m`` (they are
+          curved); plane and wedge are flat and leave it ``None``;
+        * wedge needs ``wedge_angle_rad``; every other shape must leave it
+          ``None`` (a wedge angle on a non-wedge is almost certainly a mistake).
+        """
+        needs_radius = self.shape in ("cylinder", "sphere")
+        if needs_radius and self.curvature_radius_m is None:
+            msg = f"reflector.shape {self.shape!r} requires curvature_radius_m (doc 08 §6)"
+            raise ValueError(msg)
+        if self.shape == "wedge" and self.wedge_angle_rad is None:
+            msg = "reflector.shape 'wedge' requires wedge_angle_rad (doc 03 §c)"
+            raise ValueError(msg)
+        if self.shape != "wedge" and self.wedge_angle_rad is not None:
+            msg = f"wedge_angle_rad is only valid for shape 'wedge', not {self.shape!r}"
+            raise ValueError(msg)
+        return self
 
 
 class DetectorConfig(_SubsystemBase):
@@ -438,6 +483,7 @@ class SystemConfig(_SubsystemBase):
                 "gap_m": ref.gap_m,
                 "bias_offset_m": ref.bias_offset_m,
                 "mode_field_radius_m": fib.mode_field_radius_m,
+                "wedge_angle_rad": ref.wedge_angle_rad,
             },
             "detector": {
                 "balanced": det.balanced,
@@ -489,13 +535,21 @@ def _spot_radius_m(waist_radius_m: float, wavelength_m: float, gap_m: float) -> 
 def _check_composition_geometry(
     source: SourceConfig, fiber: FiberConfig, reflector: ReflectorConfig
 ) -> None:
-    """Validate the composed reflector+fiber+source geometry (doc 03 §6).
+    """Validate the composed reflector+fiber+source geometry per shape (doc 03 §6).
 
-    Enforces, at composition time, the same guards the cylinder optics enforces
-    at run time: the reflector shape must be registered, the mirror must be wide
-    relative to the mode (``R_c >= 5 w0``) and the spot on the mirror must fit
-    the cylinder (``w(A) <= R_c/3``). Cross-subsystem because it combines the
-    reflector (R_c, A), the fiber (w0) and the source (lambda).
+    Enforces, at composition time, the same guards the optics models enforce at
+    run time, specialised by reflector shape:
+
+    * **cylinder / sphere** (curved): the shape must be registered, the mirror
+      wide relative to the mode (``R_c >= 5 w0``) and the spot must fit the
+      mirror (``w(A) <= R_c/3``);
+    * **wedge** (tilted plane): only the paraxial wedge-angle range
+      (``|alpha_w| <= 0.15 rad``); the gap positivity is already a field guard;
+    * **plane** (``R_c -> inf``): only the gap guard (a field guard) -- the
+      finite-aperture guard is vacuous for an infinite plane.
+
+    Cross-subsystem because it combines the reflector (R_c, A, alpha_w), the
+    fiber (w0) and the source (lambda).
 
     Parameters
     ----------
@@ -504,12 +558,12 @@ def _check_composition_geometry(
     fiber : FiberConfig
         Resolved fiber block (provides w0).
     reflector : ReflectorConfig
-        Resolved reflector block (provides R_c, A, shape).
+        Resolved reflector block (provides shape, R_c, A, alpha_w).
 
     Raises
     ------
     ValueError
-        If the shape is unregistered, ``R_c < 5 w0`` or ``w(A) > R_c/3``.
+        If the shape is unregistered, or a per-shape geometry guard fails.
     """
     shape = reflector.shape
     if shape not in REGISTERED_REFLECTOR_SHAPES:
@@ -518,18 +572,35 @@ def _check_composition_geometry(
         raise ValueError(msg)
 
     w0 = fiber.mode_field_radius_m
-    radius = reflector.curvature_radius_m
-    if radius < _MIN_RADIUS_PER_WAIST * w0:
-        msg = (
-            f"R_c = {radius:.3e} m violates the paraxial guard "
-            f"R_c >= {_MIN_RADIUS_PER_WAIST:g} w0 = {_MIN_RADIUS_PER_WAIST * w0:.3e} m (doc 03 §6)"
-        )
-        raise ValueError(msg)
 
-    spot = _spot_radius_m(w0, source.wavelength_m, reflector.gap_m)
-    if spot > _MAX_SPOT_PER_RADIUS * radius:
-        msg = (
-            f"spot w(A) = {spot:.3e} m exceeds R_c/3 = "
-            f"{_MAX_SPOT_PER_RADIUS * radius:.3e} m (doc 03 §6)"
-        )
-        raise ValueError(msg)
+    if shape in ("cylinder", "sphere"):
+        radius = reflector.curvature_radius_m
+        if radius is None:  # defensive: the ReflectorConfig validator enforces this
+            msg = f"reflector.shape {shape!r} requires curvature_radius_m (doc 08 §6)"
+            raise ValueError(msg)
+        if radius < _MIN_RADIUS_PER_WAIST * w0:
+            msg = (
+                f"R_c = {radius:.3e} m violates the paraxial guard "
+                f"R_c >= {_MIN_RADIUS_PER_WAIST:g} w0 = {_MIN_RADIUS_PER_WAIST * w0:.3e} m "
+                f"(doc 03 §6)"
+            )
+            raise ValueError(msg)
+        spot = _spot_radius_m(w0, source.wavelength_m, reflector.gap_m)
+        if spot > _MAX_SPOT_PER_RADIUS * radius:
+            msg = (
+                f"spot w(A) = {spot:.3e} m exceeds R_c/3 = "
+                f"{_MAX_SPOT_PER_RADIUS * radius:.3e} m (doc 03 §6)"
+            )
+            raise ValueError(msg)
+    elif shape == "wedge":
+        angle = reflector.wedge_angle_rad
+        if angle is None:  # defensive: the ReflectorConfig validator enforces this
+            msg = "reflector.shape 'wedge' requires wedge_angle_rad (doc 03 §c)"
+            raise ValueError(msg)
+        if abs(angle) > _MAX_WEDGE_ANGLE_RAD:
+            msg = (
+                f"|wedge_angle_rad| = {abs(angle):.3e} rad exceeds the paraxial range "
+                f"{_MAX_WEDGE_ANGLE_RAD:g} rad (doc 03 §6)"
+            )
+            raise ValueError(msg)
+    # plane: R_c -> inf, only the gap guard (already enforced by gap_m > 0).

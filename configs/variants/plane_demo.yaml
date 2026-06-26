@@ -1,0 +1,28 @@
+# Variant plane_demo (S9-B) -- wideband platform (mirrors B) with a plane mirror (R_c -> inf reference).
+# Demonstration composition for the reflector family: identical to B except the
+# reflector preset, so the shape's behaviour is isolated. Not part of the A-D
+# golden. SI except named-unit fields.
+name: plane_demo
+description: S9-B plane mirror (R_c -> inf reference) demo
+mode: offresonance
+band:
+  f_min_hz: 1.0
+  f_max_hz: 10000.0
+full_scale_g: 50.0
+route: 2
+eta_bias: 0.25
+q_total: 2610.0
+target_nea_ug_rthz: 10.0
+vacuum: false
+source:
+  preset: sld
+fiber:
+  preset: smf28
+cantilever:
+  preset: silica
+  overrides:
+    length_m: 2.0e-3        # L = 2.0 mm
+reflector:
+  preset: plane_flat
+detector:
+  preset: balanced_24bit

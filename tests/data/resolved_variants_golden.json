@@ -27,7 +27,8 @@
     "optics": {
       "bias_offset_m": 2e-06,
       "gap_m": 3.1e-05,
-      "mode_field_radius_m": 5.2e-06
+      "mode_field_radius_m": 5.2e-06,
+      "wedge_angle_rad": null
     },
     "q_total": 1430.0,
     "reflector": {
@@ -74,7 +75,8 @@
     "optics": {
       "bias_offset_m": 9.92e-07,
       "gap_m": 3.1e-05,
-      "mode_field_radius_m": 5.2e-06
+      "mode_field_radius_m": 5.2e-06,
+      "wedge_angle_rad": null
     },
     "q_total": 2610.0,
     "reflector": {
@@ -121,7 +123,8 @@
     "optics": {
       "bias_offset_m": 9.92e-07,
       "gap_m": 3.1e-05,
-      "mode_field_radius_m": 5.2e-06
+      "mode_field_radius_m": 5.2e-06,
+      "wedge_angle_rad": null
     },
     "q_total": 1950.0,
     "reflector": {
@@ -168,7 +171,8 @@
     "optics": {
       "bias_offset_m": 9.92e-07,
       "gap_m": 3.1e-05,
-      "mode_field_radius_m": 5.2e-06
+      "mode_field_radius_m": 5.2e-06,
+      "wedge_angle_rad": null
     },
     "q_total": 1500.0,
     "reflector": {
