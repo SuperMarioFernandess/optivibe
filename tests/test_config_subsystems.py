@@ -28,6 +28,7 @@ from optivibe.core.config import (
     load_variant,
     save_system_config,
 )
+from optivibe.core.config import subsystems as _subsystems
 
 _GOLDEN_PATH = Path(__file__).resolve().parent / "data" / "resolved_variants_golden.json"
 _GOLDEN: dict[str, dict[str, Any]] = json.loads(_GOLDEN_PATH.read_text(encoding="utf-8"))
@@ -165,13 +166,43 @@ def test_save_load_roundtrip_preserves_resolution(tmp_path: Path, config_dir: Pa
 # --------------------------------------------------------------------------- #
 # Validators / geometry guards (bad compositions fail at config time).
 # --------------------------------------------------------------------------- #
-def test_unregistered_reflector_shape_is_rejected(config_dir: Path) -> None:
-    """A reflector shape without a registered optics model fails at resolve."""
+def test_unregistered_reflector_shape_is_rejected(
+    config_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reflector shape without a registered optics model fails at resolve.
+
+    All four S9-B shapes are registered, so this exercises the *defensive*
+    branch (a shape added to the ``Literal`` but not registered): shrinking the
+    registered set must make the composition fail before it reaches a stage.
+    """
+    monkeypatch.setattr(_subsystems, "REGISTERED_REFLECTOR_SHAPES", frozenset({"cylinder"}))
     data = _base_system_dict()
     data["reflector"] = {"preset": "cyl_rc31", "overrides": {"shape": "sphere"}}
     store = PresetStore(config_dir)
     with pytest.raises(ValueError, match="not registered"):
         SystemConfig.model_validate(data).resolve(store)
+
+
+@pytest.mark.parametrize(
+    ("shape", "overrides"),
+    [
+        ("sphere", {"shape": "sphere"}),
+        ("plane", {"shape": "plane", "curvature_radius_m": None}),
+        ("wedge", {"shape": "wedge", "curvature_radius_m": None, "wedge_angle_rad": 0.02}),
+    ],
+)
+def test_reflector_family_shapes_resolve(
+    shape: str, overrides: dict[str, Any], config_dir: Path
+) -> None:
+    """The S9-B sphere/plane/wedge shapes now compose and resolve (stub removed)."""
+    data = _base_system_dict()
+    data["reflector"] = {"preset": "cyl_rc31", "overrides": overrides}
+    store = PresetStore(config_dir)
+    variant = SystemConfig.model_validate(data).resolve(store)
+    assert variant.reflector.shape == shape
+    if shape in ("plane", "wedge"):
+        assert variant.reflector.radius_of_curvature_m is None
+    assert (variant.optics.wedge_angle_rad is not None) == (shape == "wedge")
 
 
 def test_radius_guard_is_rejected(config_dir: Path) -> None:
