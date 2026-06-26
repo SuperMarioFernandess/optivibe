@@ -1,0 +1,7 @@
+# Built-in fiber-line preset: SMF-28 at 1550 nm (docs 01 §4.1, 03 §1, 04 §4).
+# Used by all variants. clad_diameter_m is informational in v1 (the mechanics
+# reads constants.fiber.diameter_m); mode_field_radius_m feeds optics.w0 and
+# fresnel_R1 feeds endface_reflectivity. SI units throughout.
+clad_diameter_m: 125.0e-6     # outer diameter D (doc 01 §4.1)
+mode_field_radius_m: 5.2e-6   # w0 at 1550 nm (doc 03 §1)
+fresnel_R1: 0.036             # bare-endface Fresnel reflectivity (doc 04 §4)

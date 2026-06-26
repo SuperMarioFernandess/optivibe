@@ -1,0 +1,7 @@
+# Built-in source preset: broadband superluminescent diode (doc 08 §6; R-13/R-30).
+# Used by variants A/B/C (route 2, coherent wash-out). A overrides power_w -> 0.020.
+# Fields are SI except the named-unit rin_db_hz (dB/Hz).
+source_kind: SLD
+wavelength_m: 1550.0e-9   # lambda, common platform (doc 03 §1, R-40)
+power_w: 0.016            # 16 mW (doc 07 §2)
+rin_db_hz: -126.0         # relative intensity noise (doc 07 §1.2)

@@ -1,0 +1,8 @@
+# Built-in reflector preset: metallized convex cylinder, R_c = 62.5 um (docs 03/08).
+# Used by variant A. Delta x0 = 2 um is the documented bias at R_c = 62.5 um
+# (doc 03 §5). SI units throughout.
+shape: cylinder
+curvature_radius_m: 62.5e-6   # R_c (doc 08 §6)
+metallization_rho: 0.98       # mirror reflectivity rho (doc 08 §6)
+gap_m: 31.0e-6                # air gap A (parametric band 20-40 um, doc 03 §6)
+bias_offset_m: 2.0e-6         # working-point de-centering Delta x0 (doc 03 §5)

@@ -1,0 +1,8 @@
+# Built-in cantilever preset: fused-silica clamped-free beam (docs 01 §4.1, 02).
+# Used by all variants, each overriding length_m. The material block is
+# informational in v1 (the mechanics reads the global constants.fiber block);
+# it documents the assumed bulk material and is positivity-validated.
+length_m: 2.0e-3              # default free length L, m (overridden per variant)
+material:
+  young_modulus_Pa: 72.0e9   # E (doc 01 §4.1)
+  density_kg_m3: 2201.0      # rho (doc 01 §4.1)

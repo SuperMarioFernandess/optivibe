@@ -1,0 +1,11 @@
+# Built-in detector preset: balanced photodiode + 24-bit AC-coupled ADC (docs 07/08; S4).
+# Used by all variants; A/C/D override adc_full_scale for their FS swing.
+# reference_arm/adc_fs_hz/antialias/rin_shape take their model defaults
+# (matched / null / true / white). adc_full_scale is in the output units (A here).
+responsivity: 1.0            # PD responsivity R, A/W (doc 07 §2)
+balanced: true               # balanced reference channel (doc 07 §1.2)
+cmrr_db: 40.0                # common-mode rejection, dB (doc 07 §1.2)
+transimpedance_ohm: 1.0e5    # feedback resistor Rf, ohm (Johnson floor; doc 07 §1.3)
+output: current              # digitize photocurrent (A)
+adc_bits: 24                 # ADC resolution, bits (doc 07 §1.4)
+adc_full_scale: 1.3e-4       # +/- range, A (variant B; ~1.3x the ~95 uA FS at 50 g)

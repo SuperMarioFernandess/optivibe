@@ -1,0 +1,9 @@
+# Built-in reflector preset: metallized convex cylinder, R_c = 31 um (docs 03/08).
+# Used by variants B/C/D. Groups the mirror geometry/coating with the air-gap
+# working point it sets. Scale-equivalent bias for R_c = 31 um:
+# Delta x0 = 2 um * (31/62.5) = 0.992 um (doc 08 §2 scaling). SI units.
+shape: cylinder
+curvature_radius_m: 31.0e-6   # R_c (doc 08 §6)
+metallization_rho: 0.98       # mirror reflectivity rho (doc 08 §6)
+gap_m: 31.0e-6                # air gap A (parametric band 20-40 um, doc 03 §6)
+bias_offset_m: 0.992e-6       # Delta x0 scaled by R_c ratio (doc 03 §5, 08 §2)

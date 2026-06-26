@@ -259,8 +259,9 @@ class VariantConfig(_Frozen):
 
     Attributes
     ----------
-    name : {"A", "B", "C", "D"}
-        Variant identifier.
+    name : str
+        Variant identifier. The four built-ins use ``"A"``..``"D"``; resolved
+        user compositions may carry any non-empty name (S9-A).
     description : str
         Short human-readable description / class.
     mode : {"offresonance", "resonance"}
@@ -302,7 +303,7 @@ class VariantConfig(_Frozen):
         Whether the variant is operated under vacuum (A/D option).
     """
 
-    name: Literal["A", "B", "C", "D"]
+    name: str = Field(min_length=1, description="Variant/composition identifier")
     description: str
     mode: Literal["offresonance", "resonance"] = "offresonance"
     band: BandConfig

@@ -1,0 +1,190 @@
+{
+  "A": {
+    "band": {
+      "f_max_hz": 100.0,
+      "f_min_hz": 0.1
+    },
+    "description": "low-frequency high-resolution (0.1-100 Hz)",
+    "detector": {
+      "adc_bits": 24,
+      "adc_fs_hz": null,
+      "adc_full_scale": 0.0005,
+      "antialias": true,
+      "balanced": true,
+      "cmrr_db": 40.0,
+      "output": "current",
+      "reference_arm": "matched",
+      "rin_shape": "white",
+      "transimpedance_ohm": 100000.0
+    },
+    "endface_reflectivity": 0.036,
+    "eta_bias": 0.25,
+    "full_scale_g": 5.0,
+    "length_m": 0.005,
+    "line_freq_hz": null,
+    "mode": "offresonance",
+    "name": "A",
+    "optics": {
+      "bias_offset_m": 2e-06,
+      "gap_m": 3.1e-05,
+      "mode_field_radius_m": 5.2e-06
+    },
+    "q_total": 1430.0,
+    "reflector": {
+      "radius_of_curvature_m": 6.25e-05,
+      "reflectivity": 0.98,
+      "shape": "cylinder"
+    },
+    "responsivity_a_w": 1.0,
+    "route": 2,
+    "source": {
+      "kind": "SLD",
+      "power_w": 0.02,
+      "rin_db_hz": -126.0,
+      "wavelength_m": 1.55e-06
+    },
+    "target_nea_ug_rthz": 1.0,
+    "vacuum": false
+  },
+  "B": {
+    "band": {
+      "f_max_hz": 10000.0,
+      "f_min_hz": 1.0
+    },
+    "description": "general-purpose wideband (1 Hz-10 kHz)",
+    "detector": {
+      "adc_bits": 24,
+      "adc_fs_hz": null,
+      "adc_full_scale": 0.00013,
+      "antialias": true,
+      "balanced": true,
+      "cmrr_db": 40.0,
+      "output": "current",
+      "reference_arm": "matched",
+      "rin_shape": "white",
+      "transimpedance_ohm": 100000.0
+    },
+    "endface_reflectivity": 0.036,
+    "eta_bias": 0.25,
+    "full_scale_g": 50.0,
+    "length_m": 0.002,
+    "line_freq_hz": null,
+    "mode": "offresonance",
+    "name": "B",
+    "optics": {
+      "bias_offset_m": 9.92e-07,
+      "gap_m": 3.1e-05,
+      "mode_field_radius_m": 5.2e-06
+    },
+    "q_total": 2610.0,
+    "reflector": {
+      "radius_of_curvature_m": 3.1e-05,
+      "reflectivity": 0.98,
+      "shape": "cylinder"
+    },
+    "responsivity_a_w": 1.0,
+    "route": 2,
+    "source": {
+      "kind": "SLD",
+      "power_w": 0.016,
+      "rin_db_hz": -126.0,
+      "wavelength_m": 1.55e-06
+    },
+    "target_nea_ug_rthz": 10.0,
+    "vacuum": false
+  },
+  "C": {
+    "band": {
+      "f_max_hz": 20000.0,
+      "f_min_hz": 10.0
+    },
+    "description": "high-frequency wideband (10 Hz-20 kHz)",
+    "detector": {
+      "adc_bits": 24,
+      "adc_fs_hz": null,
+      "adc_full_scale": 3.5e-05,
+      "antialias": true,
+      "balanced": true,
+      "cmrr_db": 40.0,
+      "output": "current",
+      "reference_arm": "matched",
+      "rin_shape": "white",
+      "transimpedance_ohm": 100000.0
+    },
+    "endface_reflectivity": 0.036,
+    "eta_bias": 0.25,
+    "full_scale_g": 50.0,
+    "length_m": 0.00141,
+    "line_freq_hz": null,
+    "mode": "offresonance",
+    "name": "C",
+    "optics": {
+      "bias_offset_m": 9.92e-07,
+      "gap_m": 3.1e-05,
+      "mode_field_radius_m": 5.2e-06
+    },
+    "q_total": 1950.0,
+    "reflector": {
+      "radius_of_curvature_m": 3.1e-05,
+      "reflectivity": 0.98,
+      "shape": "cylinder"
+    },
+    "responsivity_a_w": 1.0,
+    "route": 2,
+    "source": {
+      "kind": "SLD",
+      "power_w": 0.016,
+      "rin_db_hz": -126.0,
+      "wavelength_m": 1.55e-06
+    },
+    "target_nea_ug_rthz": 40.0,
+    "vacuum": false
+  },
+  "D": {
+    "band": {
+      "f_max_hz": 5250.0,
+      "f_min_hz": 4750.0
+    },
+    "description": "resonant narrowband at 5 kHz line (optional)",
+    "detector": {
+      "adc_bits": 24,
+      "adc_fs_hz": null,
+      "adc_full_scale": 0.013,
+      "antialias": true,
+      "balanced": true,
+      "cmrr_db": 40.0,
+      "output": "current",
+      "reference_arm": "matched",
+      "rin_shape": "white",
+      "transimpedance_ohm": 100000.0
+    },
+    "endface_reflectivity": 0.036,
+    "eta_bias": 0.25,
+    "full_scale_g": 0.022,
+    "length_m": 0.00447,
+    "line_freq_hz": 5000.0,
+    "mode": "resonance",
+    "name": "D",
+    "optics": {
+      "bias_offset_m": 9.92e-07,
+      "gap_m": 3.1e-05,
+      "mode_field_radius_m": 5.2e-06
+    },
+    "q_total": 1500.0,
+    "reflector": {
+      "radius_of_curvature_m": 3.1e-05,
+      "reflectivity": 0.98,
+      "shape": "cylinder"
+    },
+    "responsivity_a_w": 1.0,
+    "route": 1,
+    "source": {
+      "kind": "DFB",
+      "power_w": 0.1,
+      "rin_db_hz": -155.0,
+      "wavelength_m": 1.55e-06
+    },
+    "target_nea_ug_rthz": 0.22,
+    "vacuum": true
+  }
+}

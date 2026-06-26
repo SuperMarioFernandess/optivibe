@@ -17,12 +17,42 @@ from typing import Any
 import yaml
 
 from optivibe.core.config.models import Constants, ScenarioConfig, VariantConfig
+from optivibe.core.config.presets import PresetStore
+from optivibe.core.config.subsystems import SystemConfig
 from optivibe.core.logging import get_logger
 
 logger = get_logger(__name__)
 
 _ENV_VAR = "OPTIVIBE_CONFIG_DIR"
 _VALID_VARIANTS = ("A", "B", "C", "D")
+
+# Keys that mark a YAML document as a composed SystemConfig rather than a flat
+# VariantConfig. A composition references subsystem presets (``preset`` key) and
+# carries a ``cantilever`` block, which the flat variant never has.
+_COMPOSITION_MARKERS: tuple[str, ...] = ("cantilever",)
+
+
+def _is_composition(data: dict[str, Any]) -> bool:
+    """Return ``True`` if ``data`` is a composed :class:`SystemConfig` document.
+
+    A composition is detected either by a top-level ``cantilever`` block (absent
+    from the flat variant) or by a ``source`` mapping that references a preset
+    (``source.preset``) rather than inlining the source fields.
+
+    Parameters
+    ----------
+    data : dict
+        Parsed YAML mapping.
+
+    Returns
+    -------
+    bool
+        Whether the document should be parsed as a composition.
+    """
+    if any(marker in data for marker in _COMPOSITION_MARKERS):
+        return True
+    source = data.get("source")
+    return isinstance(source, dict) and "preset" in source
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -114,21 +144,59 @@ def load_constants(path: Path | None = None) -> Constants:
     return Constants.model_validate(_read_yaml(path))
 
 
-def load_variant_file(path: Path) -> VariantConfig:
-    """Load and validate a single variant file.
+def load_variant_file(path: Path, config_dir: Path | None = None) -> VariantConfig:
+    """Load and validate a single variant file (flat or composed).
+
+    The file may be a legacy flat ``VariantConfig`` or a composed
+    :class:`~optivibe.core.config.subsystems.SystemConfig` (subsystem presets +
+    overrides). Compositions are resolved to the same flat ``VariantConfig`` the
+    stages read, so the return type is identical in both cases.
 
     Parameters
     ----------
     path : pathlib.Path
         Path to a ``variants/{name}.yaml`` file.
+    config_dir : pathlib.Path or None, optional
+        Configuration directory used to locate subsystem presets when the file
+        is a composition. Defaults to the file's grandparent (``<dir>/variants``
+        -> ``<dir>``) when it holds a ``presets/`` tree, else
+        :func:`default_config_dir`.
 
     Returns
     -------
     VariantConfig
-        Validated variant configuration.
+        Validated (and, for compositions, resolved) variant configuration.
     """
     logger.debug("loading variant from %s", path)
-    return VariantConfig.model_validate(_read_yaml(path))
+    data = _read_yaml(path)
+    if not _is_composition(data):
+        return VariantConfig.model_validate(data)
+    resolved_dir = _resolve_preset_root(path, config_dir)
+    system = SystemConfig.model_validate(data)
+    return system.resolve(PresetStore(resolved_dir))
+
+
+def _resolve_preset_root(variant_path: Path, config_dir: Path | None) -> Path:
+    """Pick the ``configs/`` root that holds the preset tiers for a composition.
+
+    Parameters
+    ----------
+    variant_path : pathlib.Path
+        Path of the composition file (under ``<config_dir>/variants/``).
+    config_dir : pathlib.Path or None
+        Explicit override; returned as-is when given.
+
+    Returns
+    -------
+    pathlib.Path
+        Directory expected to contain ``presets/`` and ``user/``.
+    """
+    if config_dir is not None:
+        return config_dir
+    inferred = variant_path.resolve().parent.parent
+    if (inferred / "presets").is_dir():
+        return inferred
+    return default_config_dir()
 
 
 def load_variant(name: str, config_dir: Path | None = None) -> VariantConfig:
@@ -144,7 +212,7 @@ def load_variant(name: str, config_dir: Path | None = None) -> VariantConfig:
     Returns
     -------
     VariantConfig
-        Validated variant configuration.
+        Validated variant configuration (resolved if stored as a composition).
 
     Raises
     ------
@@ -156,7 +224,7 @@ def load_variant(name: str, config_dir: Path | None = None) -> VariantConfig:
         raise ValueError(msg)
     if config_dir is None:
         config_dir = default_config_dir()
-    return load_variant_file(config_dir / "variants" / f"{name}.yaml")
+    return load_variant_file(config_dir / "variants" / f"{name}.yaml", config_dir)
 
 
 def load_scenario(path: Path) -> ScenarioConfig:

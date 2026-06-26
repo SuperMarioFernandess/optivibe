@@ -1,52 +1,35 @@
-# Variant A — low-frequency, high-resolution (doc 08 §6.2/§6.3).
-# Common optical platform R-40: lambda=1550 nm, rho=0.98 (metallized),
-# R=1 A/W, R1=0.036, route 2, eta0 bias rule (~0.25). Values are SI except
-# where a unit is named in the field (g, ug/sqrt(Hz), dB/Hz).
+# Variant A -- low-frequency, high-resolution (doc 08 §6.2/§6.3).
+# Composed form (S9-A): subsystem presets + per-subsystem overrides. Resolves
+# bit-identically to the former flat variant. Common optical platform R-40:
+# lambda=1550 nm, rho=0.98, R=1 A/W, R1=0.036, route 2, eta0 bias ~0.25.
+# Values are SI except named-unit fields (g, ug/sqrt(Hz), dB/Hz).
 name: A
 description: low-frequency high-resolution (0.1-100 Hz)
 mode: offresonance
 band:
   f_min_hz: 0.1
   f_max_hz: 100.0
-length_m: 5.0e-3          # L = 5.0 mm  -> f1 ~ 4.0 kHz
 full_scale_g: 5.0
-reflector:
-  shape: cylinder
-  radius_of_curvature_m: 62.5e-6   # R_c
-  reflectivity: 0.98               # rho (metallized)
-source:
-  kind: SLD
-  wavelength_m: 1550.0e-9
-  power_w: 0.020          # 20 mW (range 20-50 mW)
-  rin_db_hz: -126.0
-# Q_total at L=5.0 mm: DERIVED via the documented scaling Q_air ~ 1/L
-# (doc 07 §2.3: Q_air(3mm)=2377 -> Q_air(5mm)~1426; Q_anchor=2.17(L/D)^3
-# ~1.4e5 is negligible in parallel). Not a tabulated number of 07 §4.3
-# (table ends at 4.0 mm) — to be refined by the computable Q(L) model
-# (loop, doc 14 §8).
-q_total: 1430.0
 route: 2
-responsivity_a_w: 1.0
-endface_reflectivity: 0.036
 eta_bias: 0.25
+# Q_total at L=5.0 mm: DERIVED via Q_air ~ 1/L (doc 07 §2.3); refined by the
+# computable Q(L) model (loop, doc 14 §8). Variant-specific -> stays here.
+q_total: 1430.0
 target_nea_ug_rthz: 1.0   # target ~1 ug/sqrt(Hz) (NEA ~0.1-0.5 achievable)
 vacuum: false
-# Optical working point (doc 03 §1/§6; S3 calibration, journal 2026-06-12):
-# A = 31 um anchors eta0/eta_peak/slopes to the doc 04/05 references within 5 %;
-# Delta x0 = 2 um is the documented bias at R_c = 62.5 um (doc 03 §5).
-optics:
-  gap_m: 31.0e-6            # air gap A (parametric band 20-40 um, doc 03 §6)
-  bias_offset_m: 2.0e-6     # working-point de-centering Delta x0 (doc 03 §5)
-  mode_field_radius_m: 5.2e-6  # w0 at 1550 nm, SMF-28 (doc 03 §1)
-# Detector front-end and ADC (docs 07/08; S4). Balanced channel + CMRR 40 dB
-# (auto-balanced range 30-70 dB, doc 07 §1.2); Rf = 100 kOhm is the Johnson
-# floor (doc 07 §1.3); the AC-coupled ADC full scale spans the FS modulation
-# (precision class: chopper + AC-coupling < 0.1 Hz removes the DC pedestal,
-# doc 07 §1.4). FS swing |s_target|*FS*g0 ~ 0.35 mA at 5 g.
+source:
+  preset: sld
+  overrides:
+    power_w: 0.020          # 20 mW (range 20-50 mW); SLD default is 16 mW
+fiber:
+  preset: smf28
+cantilever:
+  preset: silica
+  overrides:
+    length_m: 5.0e-3        # L = 5.0 mm -> f1 ~ 4.0 kHz
+reflector:
+  preset: cyl_rc62          # R_c = 62.5 um, Delta x0 = 2.0 um (doc 03 §5)
 detector:
-  balanced: true
-  cmrr_db: 40.0
-  transimpedance_ohm: 1.0e5
-  output: current
-  adc_bits: 24
-  adc_full_scale: 5.0e-4      # +/- range, A (~1.3x the ~0.35 mA FS swing at 5 g)
+  preset: balanced_24bit
+  overrides:
+    adc_full_scale: 5.0e-4  # +/- range, A (~1.3x the ~0.35 mA FS swing at 5 g)

@@ -1,47 +1,30 @@
-# Variant C — high-frequency wideband (doc 08 §6.2/§6.3).
-# Common optical platform R-40 (see A). Values SI except named-unit fields.
+# Variant C -- high-frequency wideband (doc 08 §6.2/§6.3).
+# Composed form (S9-A). Resolves bit-identically to the former flat variant.
+# Common optical platform R-40 (see A). SI except named-unit fields.
 name: C
 description: high-frequency wideband (10 Hz-20 kHz)
 mode: offresonance
 band:
   f_min_hz: 10.0
   f_max_hz: 20000.0
-length_m: 1.41e-3         # L = 1.41 mm  -> f1 ~ 50 kHz
 full_scale_g: 50.0
-reflector:
-  shape: cylinder
-  radius_of_curvature_m: 31.0e-6   # R_c
-  reflectivity: 0.98
-source:
-  kind: SLD
-  wavelength_m: 1550.0e-9
-  power_w: 0.016          # 16 mW (range 16-50 mW)
-  rin_db_hz: -126.0
-# Q_total at L=1.41 mm = 1950 — conservative documented value (doc 07
-# §2.3, R-26: anchor-limited bound of the 1950..5490 range; mounting-
-# dependent).
-q_total: 1950.0
 route: 2
-responsivity_a_w: 1.0
-endface_reflectivity: 0.036
 eta_bias: 0.25
+# Q_total at L=1.41 mm = 1950 -- conservative documented value (doc 07 §2.3, R-26).
+q_total: 1950.0
 target_nea_ug_rthz: 40.0  # target ~30-50 ug/sqrt(Hz) (NEA ~24-43 modelled)
 vacuum: false
-# Optical working point (doc 03 §1/§6; S3 calibration, journal 2026-06-12).
-# Scale-equivalent bias for R_c = 31 um: Delta x0 = 2 um * (31/62.5) = 0.992 um —
-# since sigma ~ R_c (doc 04 §4), this keeps eta0/eta_peak at the documented
-# working-point ratio of the R_c = 62.5 um platform (doc 08, R-40).
-optics:
-  gap_m: 31.0e-6            # air gap A (parametric band 20-40 um, doc 03 §6)
-  bias_offset_m: 0.992e-6   # Delta x0 scaled by R_c ratio (doc 08 §2 scaling)
-  mode_field_radius_m: 5.2e-6  # w0 at 1550 nm, SMF-28 (doc 03 §1)
-# Detector front-end and ADC (docs 07/08; S4). Balanced channel + CMRR 40 dB
-# (doc 07 §1.2); Rf = 100 kOhm Johnson floor (doc 07 §1.3); AC-coupled ADC
-# (doc 07 §1.4). FS swing |s_target|*FS*g0 ~ 24 uA at 50 g.
+source:
+  preset: sld               # 16 mW (range 16-50 mW)
+fiber:
+  preset: smf28
+cantilever:
+  preset: silica
+  overrides:
+    length_m: 1.41e-3       # L = 1.41 mm -> f1 ~ 50 kHz
+reflector:
+  preset: cyl_rc31          # R_c = 31 um, Delta x0 = 0.992 um (doc 08 §2 scaling)
 detector:
-  balanced: true
-  cmrr_db: 40.0
-  transimpedance_ohm: 1.0e5
-  output: current
-  adc_bits: 24
-  adc_full_scale: 3.5e-5      # +/- range, A (~1.5x the ~24 uA FS swing at 50 g)
+  preset: balanced_24bit
+  overrides:
+    adc_full_scale: 3.5e-5  # +/- range, A (~1.5x the ~24 uA FS swing at 50 g)

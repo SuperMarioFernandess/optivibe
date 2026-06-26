@@ -1,0 +1,6 @@
+# Built-in source preset: narrow-line distributed-feedback laser (doc 08 §6; R-15).
+# Used by variant D (route 1, AR endface, resonant). SI except rin_db_hz (dB/Hz).
+source_kind: DFB
+wavelength_m: 1550.0e-9   # lambda (doc 03 §1)
+power_w: 0.100            # 100 mW (doc 07 §2)
+rin_db_hz: -155.0         # low-RIN DFB (doc 07 §1.2)
