@@ -360,4 +360,3 @@ class CylinderOptics(ReflectorOptics):
     S3 behaviour. The cylinder *model* (:class:`CylinderOpticsModel`) still
     refuses non-cylinder shapes in :meth:`CylinderOpticsModel.from_config`.
     """
-

@@ -71,9 +71,7 @@ if TYPE_CHECKING:  # avoid importing the heavy resolved model at runtime import 
 # (:mod:`optivibe.optics.reflector`); each maps to a registered model factory in
 # :data:`optivibe.optics.REFLECTOR_MODEL_REGISTRY`. A composition naming any
 # other shape is rejected at composition time.
-REGISTERED_REFLECTOR_SHAPES: frozenset[str] = frozenset(
-    {"cylinder", "sphere", "plane", "wedge"}
-)
+REGISTERED_REFLECTOR_SHAPES: frozenset[str] = frozenset({"cylinder", "sphere", "plane", "wedge"})
 
 # Paraxial validity guards of the cylinder optics (doc 03 §6). Mirrors the
 # runtime constants of :mod:`optivibe.optics.cylinder` so a bad composition
