@@ -279,9 +279,7 @@ def test_sphere_requires_radius(variant_sphere: VariantConfig) -> None:
     """A sphere variant without a radius fails in from_config."""
     no_radius = variant_sphere.model_copy(
         update={
-            "reflector": variant_sphere.reflector.model_copy(
-                update={"radius_of_curvature_m": None}
-            )
+            "reflector": variant_sphere.reflector.model_copy(update={"radius_of_curvature_m": None})
         }
     )
     with pytest.raises(ValueError, match="radius"):
