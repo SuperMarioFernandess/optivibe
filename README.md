@@ -68,11 +68,15 @@ Workflow:
    composition to `configs/user/systems/` and load it back. Then build the
    excitation (`sine` / `multitone` / `sweep` / `random` / `shock`, or replay a
    CSV/WAV file) — the **multitone** editor adds/removes components dynamically
-   (default two) with an optional per-tone phase — and flip the physics layers
-   (optics `cylinder` ↔ `stub`, detector `photodiode` ↔ `stub`, DSP `standard` ↔
-   `stub`, plus the seed). The defaults reproduce variant B / `recover_sine`, so
-   the first **Run** shows a faithful recovery. (The calibrated `standard` inverse
-   is cylinder-only; the sphere/plane/wedge family runs with the `stub` inverse.)
+   (default two) with an optional per-tone phase — and flip the physics layers,
+   which select only the **stage implementation** (physical vs `stub`): optics
+   `physical (reflector)` ↔ `stub` (the reflector *shape* is set in the Reflector
+   form), detector `photodiode` ↔ `stub`, DSP `standard` ↔ `stub`, plus the seed.
+   Physical parameters live in the composition forms — in particular the
+   detector's balanced / reference-arm settings are set once in the Detector
+   form. The defaults reproduce variant B / `recover_sine`, so the first **Run**
+   shows a faithful recovery. (The calibrated `standard` inverse is cylinder-only;
+   the sphere/plane/wedge family runs with the `stub` inverse.)
 2. **Run / Report.** *Run* executes the forward + inverse pipeline on a worker
    thread — resolving the edited composition off the UI thread — and fills the
    **Live** tab (a bending-cantilever animation, the input-vs-recovered

@@ -70,21 +70,38 @@ def test_main_window_builds_tabs(qtbot) -> None:
 
 
 def test_control_panel_assembles_scenario(qtbot) -> None:
+    from optivibe.core.config.loader import default_config_dir
+    from optivibe.gui.controllers.system_builder import (
+        build_system_config,
+        resolve_system_variant,
+    )
+
     window = MainWindow()
     qtbot.addWidget(window)
     panel = window.control_panel
-    # Default: variant B, photodiode -> detector overrides present.
+    # Default: variant B, photodiode stage, physical optics (key "cylinder").
     payload = panel.scenario_payload()
     scenario = build_scenario_config(payload)
     assert scenario.variant == "B"
     assert scenario.stages.detector == "photodiode"
-    assert "detector" in payload
-    # Switching to the stub omits detector overrides (the option-less stub takes
-    # no constructor arguments; 14 §5).
+    assert scenario.stages.optics == "cylinder"
+    # The scenario no longer emits any detector override (single source of
+    # truth: balanced / reference_arm live in the composition; S7-mod cleanup).
+    assert "detector" not in payload
+    # Switching the detector stage to the stub still works and emits no override.
     panel._detector.setCurrentText("stub")
     stub_payload = panel.scenario_payload()
     assert stub_payload["stages"]["detector"] == "stub"
     assert "detector" not in stub_payload
+    # balanced / reference_arm are governed by the composition's Detector form
+    # and flow into the resolved variant.detector.
+    panel.system._balanced.setChecked(False)
+    panel.system._reference_arm.setCurrentText("bright")
+    variant = resolve_system_variant(
+        build_system_config(panel.system_payload()), default_config_dir()
+    )
+    assert variant.detector.balanced is False
+    assert variant.detector.reference_arm == "bright"
 
 
 def test_computation_runs_off_the_gui_thread(qtbot) -> None:
