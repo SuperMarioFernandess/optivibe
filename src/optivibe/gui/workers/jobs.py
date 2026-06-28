@@ -36,9 +36,11 @@ from optivibe.analysis import (
     run_sweep,
     truth_vs_recovery,
 )
-from optivibe.core.config.loader import load_scenario, load_variant
-from optivibe.core.config.models import ScenarioConfig
+from optivibe.core.config.loader import default_config_dir, load_scenario, load_variant
+from optivibe.core.config.models import ScenarioConfig, VariantConfig
+from optivibe.core.config.subsystems import SystemConfig
 from optivibe.core.logging import get_logger
+from optivibe.gui.controllers.system_builder import resolve_system_variant
 from optivibe.pipeline import Pipeline, RunArtifacts
 
 logger = get_logger(__name__)
@@ -119,6 +121,7 @@ def build_run_artifacts(
     *,
     progress: ProgressFn,
     is_cancelled: CancelFn,
+    system: SystemConfig | None = None,
 ) -> RunArtifacts:
     """Run forward + inverse for a config *or* a scenario file (shared helper).
 
@@ -127,6 +130,19 @@ def build_run_artifacts(
     round-trip), or a path is loaded first. The forward and inverse passes are
     run separately so the worker can report progress and poll for cancellation
     between them.
+
+    Variant selection has two routes (task S7-mod §1/§6):
+
+    * **By name (default).** ``scenario.variant`` (one of ``A``..``D`` or a
+      ``*_demo`` literal) is loaded from ``config_dir`` -- the S0..S9 path,
+      unchanged.
+    * **By edited composition.** When ``system`` is given (the GUI assembled an
+      *editable* :class:`~optivibe.core.config.subsystems.SystemConfig`), it is
+      **resolved on this worker thread** into the flat variant and used instead
+      of loading by name. ``scenario.variant`` then merely labels the starting
+      composition (its ``Literal`` type is a frozen ICD contract; the resolved
+      variant carries the real, edited parameters). Resolution reads preset
+      files off disk, so it must not run in the UI thread (SW-06).
 
     Parameters
     ----------
@@ -140,6 +156,9 @@ def build_run_artifacts(
         Progress reporter.
     is_cancelled : Callable[[], bool]
         Cancel poll.
+    system : SystemConfig or None, optional
+        An edited composition to resolve and run instead of loading
+        ``scenario.variant`` by name.
 
     Returns
     -------
@@ -157,8 +176,13 @@ def build_run_artifacts(
             raise ValueError(msg)
         progress("loading scenario")
         scenario = load_scenario(Path(source))
-    progress("loading variant")
-    variant = load_variant(scenario.variant, config_dir=config_dir)
+    variant: VariantConfig
+    if system is not None:
+        progress("resolving composition")
+        variant = resolve_system_variant(system, config_dir or default_config_dir())
+    else:
+        progress("loading variant")
+        variant = load_variant(scenario.variant, config_dir=config_dir)
     pipeline = Pipeline(scenario, variant)
     progress("forward model")
     forward = pipeline.forward()
@@ -181,11 +205,15 @@ class ScenarioJob:
         A scenario YAML path (back-compatible with the S0 path-based run).
     config_dir : pathlib.Path or None, optional
         Override for the ``configs/`` directory.
+    system : SystemConfig or None, optional
+        An edited composition to resolve and run instead of the named variant
+        (task S7-mod §1); ``None`` keeps the by-name path.
     """
 
     scenario: ScenarioConfig | None = None
     source: Path | str | None = None
     config_dir: Path | None = None
+    system: SystemConfig | None = None
     label: str = "run scenario"
 
     def run(self, *, progress: ProgressFn, is_cancelled: CancelFn) -> object:
@@ -196,6 +224,7 @@ class ScenarioJob:
             self.config_dir,
             progress=progress,
             is_cancelled=is_cancelled,
+            system=self.system,
         )
 
 
@@ -211,17 +240,25 @@ class ReportJob:
         Override for the ``configs/`` directory.
     band_hz : tuple of float or None, optional
         Assessment band for the spectral error (full spectrum when ``None``).
+    system : SystemConfig or None, optional
+        An edited composition to resolve and run instead of the named variant.
     """
 
     scenario: ScenarioConfig
     config_dir: Path | None = None
     band_hz: tuple[float, float] | None = None
+    system: SystemConfig | None = None
     label: str = "report"
 
     def run(self, *, progress: ProgressFn, is_cancelled: CancelFn) -> object:
         """Run the scenario then assemble the ``ReportBundle``."""
         artifacts = build_run_artifacts(
-            self.scenario, None, self.config_dir, progress=progress, is_cancelled=is_cancelled
+            self.scenario,
+            None,
+            self.config_dir,
+            progress=progress,
+            is_cancelled=is_cancelled,
+            system=self.system,
         )
         progress("error budget")
         budget = truth_vs_recovery(
