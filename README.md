@@ -59,24 +59,39 @@ optivibe-gui
 
 Workflow:
 
-1. **Control panel (left).** Pick a sensor variant (A/B/C/D), build the
+1. **Control panel (left).** Describe the sensor as an **editable composition**:
+   start from one of the A/B/C/D *starting compositions*, then edit any subsystem
+   (source / fiber / cantilever / reflector / detector) by choosing a preset and
+   overriding its labelled, unit-carrying fields. The **reflector** form selects
+   the profile (`cylinder` / `sphere` / `plane` / `wedge`) with the matching
+   parameters (`R_c` for the curved shapes, `α_w` for the wedge). Save a
+   composition to `configs/user/systems/` and load it back. Then build the
    excitation (`sine` / `multitone` / `sweep` / `random` / `shock`, or replay a
-   CSV/WAV file), and flip the physics layers to demonstrate them: optics
-   `cylinder` ↔ `stub`, detector `photodiode` ↔ `stub` (with the balanced
-   channel and reference-arm convention), DSP `standard` ↔ `stub` (with the
-   sensitivity model and integrator), plus the random seed. The defaults are the
-   `recover_sine` preset, so the first **Run** shows a faithful recovery.
+   CSV/WAV file) — the **multitone** editor adds/removes components dynamically
+   (default two) with an optional per-tone phase — and flip the physics layers
+   (optics `cylinder` ↔ `stub`, detector `photodiode` ↔ `stub`, DSP `standard` ↔
+   `stub`, plus the seed). The defaults reproduce variant B / `recover_sine`, so
+   the first **Run** shows a faithful recovery. (The calibrated `standard` inverse
+   is cylinder-only; the sphere/plane/wedge family runs with the `stub` inverse.)
 2. **Run / Report.** *Run* executes the forward + inverse pipeline on a worker
-   thread and fills the **Live** tab (a bending-cantilever animation driven by
-   the first mode shape, the input-vs-recovered acceleration, the detector
-   signal, the recovered velocity/displacement and spectrum). *Report* adds the
-   analysis: the **Report** tab shows the truth-vs-recovery a/v/x overlay, the
-   NEA budget with its shot/RIN/Johnson split, the spectrogram and the error
-   budget; the Live tab's NEA(f) panel fills in.
+   thread — resolving the edited composition off the UI thread — and fills the
+   **Live** tab (a bending-cantilever animation, the input-vs-recovered
+   acceleration, the detector signal, the recovered velocity/displacement and
+   spectrum). Each Live panel has a **show/hide checkbox** that reflows the layout
+   so the visible panels expand. *Report* adds the analysis: the **Report** tab
+   shows the truth-vs-recovery a/v/x overlay, the NEA budget with its
+   shot/RIN/Johnson split, the spectrogram and the error budget; the Live NEA(f)
+   panel fills in.
 3. **Sweeps / Monte-Carlo.** The **Sweeps** tab runs a design or response
    parameter sweep; the **Monte-Carlo** tab runs a tolerance Monte-Carlo. Both
    render the corresponding `viz` figure.
-4. **Cancel / Export.** A running job can be cancelled (its result is dropped);
+4. **Physics.** The **Physics** tab is a reference surface for the current
+   composition: light, auto-recomputed design curves (`f1(L)`, `|H_lat(f)|`,
+   `η(Δx)`) built by `optivibe.viz.physics`, a *Compute NEA(f)* button that runs
+   the measured budget through the worker, and reference notes (mechanics,
+   reference-arm options, inverse/DSP, sensitivity, integrator). The sensor
+   *family* sweep is on the Sweeps tab.
+5. **Cancel / Export.** A running job can be cancelled (its result is dropped);
    **Export** writes the current figures (PNG) and result (`.npz`) to a folder.
 
 The heavy work always runs on a background `QThread` (the GUI thread never
