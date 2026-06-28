@@ -38,6 +38,7 @@ from optivibe.analysis import (
 )
 from optivibe.core.config.loader import load_constants
 from optivibe.core.config.models import ScenarioConfig
+from optivibe.core.config.subsystems import SystemConfig
 from optivibe.core.logging import get_logger
 from optivibe.gui.controllers.job_controller import JobController
 from optivibe.gui.controllers.scenario_builder import (
@@ -45,10 +46,12 @@ from optivibe.gui.controllers.scenario_builder import (
     build_scenario_config,
     build_sweep_spec,
 )
+from optivibe.gui.controllers.system_builder import build_system_config
 from optivibe.gui.widgets import (
     ControlPanel,
     LiveView,
     MonteCarloPanel,
+    PhysicsTab,
     ReportPanel,
     SweepPanel,
 )
@@ -93,13 +96,15 @@ class MainWindow(QMainWindow):
         self._controller.failed.connect(self._on_failed)
         self._controller.cancelled.connect(self._on_cancelled)
 
-        self._panel = ControlPanel()
+        self._panel = ControlPanel(config_dir=config_dir)
         self._live = LiveView()
         self._report = ReportPanel()
         self._sweep = SweepPanel()
         self._monte = MonteCarloPanel()
+        self._physics = PhysicsTab(self._panel, config_dir=config_dir)
         self._sweep.run_requested.connect(self._on_sweep)
         self._monte.run_requested.connect(self._on_monte_carlo)
+        self._physics.nea_requested.connect(self._on_report)
 
         self._run_button = QPushButton("Run")
         self._report_button = QPushButton("Report")
@@ -116,6 +121,8 @@ class MainWindow(QMainWindow):
         self._tabs.addTab(self._report, "Report")
         self._tabs.addTab(self._sweep, "Sweeps")
         self._tabs.addTab(self._monte, "Monte-Carlo")
+        self._tabs.addTab(self._physics, "Physics")
+        self._tabs.currentChanged.connect(self._on_tab_changed)
 
         self.setCentralWidget(self._build_central())
         self._progress = QProgressBar()
@@ -162,14 +169,24 @@ class MainWindow(QMainWindow):
         scenario = self._build_scenario()
         if scenario is None:
             return
-        self._start(ScenarioJob(scenario=scenario, config_dir=self._config_dir), "run")
+        system = self._build_system()
+        if system is None:
+            return
+        self._start(
+            ScenarioJob(scenario=scenario, config_dir=self._config_dir, system=system), "run"
+        )
 
     def _on_report(self) -> None:
         """Run the scenario and build the analysis report."""
         scenario = self._build_scenario()
         if scenario is None:
             return
-        self._start(ReportJob(scenario=scenario, config_dir=self._config_dir), "report")
+        system = self._build_system()
+        if system is None:
+            return
+        self._start(
+            ReportJob(scenario=scenario, config_dir=self._config_dir, system=system), "report"
+        )
 
     def _on_sweep(self) -> None:
         """Run a parameter sweep from the Sweep panel."""
@@ -195,6 +212,19 @@ class MainWindow(QMainWindow):
             return build_scenario_config(self._panel.scenario_payload())
         except (ValueError, TypeError) as exc:
             self.statusBar().showMessage(f"Invalid scenario: {str(exc).splitlines()[0]}")
+            return None
+
+    def _build_system(self) -> SystemConfig | None:
+        """Validate the edited composition payload (or report the error).
+
+        The resolved variant is produced on the worker thread (SW-06); here we
+        only assemble and validate the frozen :class:`SystemConfig` so a bad
+        edit is reported before a job starts.
+        """
+        try:
+            return build_system_config(self._panel.system_payload())
+        except (ValueError, TypeError) as exc:
+            self.statusBar().showMessage(f"Invalid composition: {str(exc).splitlines()[0]}")
             return None
 
     def _start(self, job: Job, label: str) -> None:
@@ -228,6 +258,8 @@ class MainWindow(QMainWindow):
             self._report.show_bundle(result)
             self._live.show_artifacts(result.artifacts, self._beta1_l)
             self._live.show_nea(result.nea)
+            if result.nea is not None:
+                self._physics.set_nea_figure(plot_nea_budget(result.nea))
             self._tabs.setCurrentWidget(self._report)
             self.statusBar().showMessage(
                 f"Report ready: amplitude ratio {result.budget.amplitude_ratio:.4f}, "
@@ -255,6 +287,11 @@ class MainWindow(QMainWindow):
             f"Done: variant {artifacts.variant.name}, {result.n_samples} samples, "
             f"dominant {dominant} Hz."
         )
+
+    def _on_tab_changed(self, index: int) -> None:
+        """Rebuild the light physics curves when the Physics tab is shown."""
+        if self._tabs.widget(index) is self._physics:
+            self._physics.refresh_light()
 
     def _on_failed(self, message: str) -> None:
         """Report a failed job."""

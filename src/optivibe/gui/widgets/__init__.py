@@ -6,6 +6,8 @@ from optivibe.gui.widgets.control_panel import ControlPanel
 from optivibe.gui.widgets.excitation_builder import ExcitationBuilder
 from optivibe.gui.widgets.live_view import LiveView
 from optivibe.gui.widgets.mpl_canvas import MplFigureView
+from optivibe.gui.widgets.physics_tab import PhysicsTab
+from optivibe.gui.widgets.subsystem_forms import SystemBuilderPanel
 
 __all__ = [
     "CantileverView",
@@ -14,6 +16,8 @@ __all__ = [
     "LiveView",
     "MonteCarloPanel",
     "MplFigureView",
+    "PhysicsTab",
     "ReportPanel",
     "SweepPanel",
+    "SystemBuilderPanel",
 ]
