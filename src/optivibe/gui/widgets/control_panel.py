@@ -1,17 +1,24 @@
-"""Control panel widget: variant, excitation, stage toggles, seed (task S7 §2).
+"""Control panel widget: composition, excitation, stage toggles, seed.
 
-Gathers the buyer-facing controls -- pick a variant, build an excitation, flip
-the physics layers (optics ``cylinder``/``stub``, detector ``stub``/``photodiode``
-with balanced + reference-arm, DSP ``stub``/``standard`` with the sensitivity
-model and integrator) and a seed -- and assembles a scenario *payload* for
-:func:`optivibe.gui.controllers.scenario_builder.build_scenario_config`. No
-physics here: every value flows into the existing config models (09 §9).
-Detector overrides are emitted only for the ``photodiode`` stage (the option-less
-``stub`` takes no arguments; 14 §5).
+Gathers the buyer-facing controls. Since task S7-mod the sensor is described by
+an **editable composition** (:class:`~optivibe.gui.widgets.subsystem_forms.SystemBuilderPanel`,
+one form per subsystem with presets and overrides) rather than a single A/B/C/D
+combo; the A/B/C/D variants survive as *starting compositions*. The rest is as
+before -- build an excitation, flip the physics layers (optics ``cylinder``/
+``stub``, detector ``stub``/``photodiode`` with balanced + reference-arm, DSP
+``stub``/``standard`` with the sensitivity model and integrator) and a seed --
+assembled into a scenario *payload* for
+:func:`optivibe.gui.controllers.scenario_builder.build_scenario_config`, plus a
+**composition payload** for
+:func:`optivibe.gui.controllers.system_builder.build_system_config`. No physics
+here: every value flows into the existing config models (09 §9). Detector
+overrides are emitted only for the ``photodiode`` stage (the option-less ``stub``
+takes no arguments; 14 §5).
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from PySide6.QtWidgets import (
@@ -25,32 +32,25 @@ from PySide6.QtWidgets import (
 )
 
 from optivibe.gui.widgets.excitation_builder import ExcitationBuilder
+from optivibe.gui.widgets.subsystem_forms import SystemBuilderPanel
 
 __all__ = ["ControlPanel"]
 
-_VARIANTS = {
-    "A": "A - low-frequency high-resolution",
-    "B": "B - general-purpose wideband",
-    "C": "C - high-frequency wideband",
-    "D": "D - resonant narrowband",
-}
-
 
 class ControlPanel(QWidget):
-    """Scenario controls assembled into a payload for the worker.
+    """Scenario + composition controls assembled into payloads for the worker.
 
     Parameters
     ----------
+    config_dir : pathlib.Path or None, optional
+        Configuration root passed to the composition panel.
     parent : QWidget or None, optional
         Parent widget.
     """
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, config_dir: Path | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._variant = QComboBox()
-        for key, label in _VARIANTS.items():
-            self._variant.addItem(label, key)
-        self._variant.setCurrentIndex(1)  # B
+        self._system = SystemBuilderPanel(config_dir=config_dir)
 
         self._excitation = ExcitationBuilder()
 
@@ -74,7 +74,7 @@ class ControlPanel(QWidget):
         self._dsp.currentTextChanged.connect(self._on_dsp_changed)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(self._variant_group())
+        layout.addWidget(self._composition_group())
         layout.addWidget(self._excitation_group())
         layout.addWidget(self._stages_group())
         layout.addWidget(self._run_group())
@@ -89,10 +89,10 @@ class ControlPanel(QWidget):
         box.addItems(items)
         return box
 
-    def _variant_group(self) -> QGroupBox:
-        group = QGroupBox("Sensor variant")
-        form = QFormLayout(group)
-        form.addRow("Variant", self._variant)
+    def _composition_group(self) -> QGroupBox:
+        group = QGroupBox("Sensor composition")
+        layout = QVBoxLayout(group)
+        layout.addWidget(self._system)
         return group
 
     def _excitation_group(self) -> QGroupBox:
@@ -133,12 +133,26 @@ class ControlPanel(QWidget):
         self._sensitivity.setEnabled(is_standard)
         self._integrator.setEnabled(is_standard)
 
+    @property
+    def system(self) -> SystemBuilderPanel:
+        """The composition panel (exposed for tests and the physics tab)."""
+        return self._system
+
     def variant_key(self) -> str:
-        """Return the selected variant identifier (``A``..``D``)."""
-        return str(self._variant.currentData())
+        """Return the starting-composition label (the scenario variant literal)."""
+        return self._system.starting_variant_key()
+
+    def system_payload(self) -> dict[str, Any]:
+        """Return the editable-composition payload (for ``build_system_config``)."""
+        return self._system.system_payload()
 
     def scenario_payload(self) -> dict[str, Any]:
         """Assemble the scenario payload from the current selections.
+
+        The ``variant`` field carries the starting-composition label (a frozen
+        ``Literal`` in :class:`~optivibe.core.config.models.ScenarioConfig`); the
+        edited parameters travel separately via :meth:`system_payload` and are
+        resolved into the variant on the worker thread (task S7-mod §1).
 
         Returns
         -------

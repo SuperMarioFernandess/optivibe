@@ -1,4 +1,4 @@
-"""Live PyQtGraph displays for a run (task S7 §3).
+"""Live PyQtGraph displays for a run (task S7 §3; visibility toggles S7-mod §4).
 
 Renders, off nothing but core/analysis *results* (no DSP in the view): the
 cantilever bend animation; the time-domain input-vs-recovered acceleration; the
@@ -8,6 +8,12 @@ NEA(f) density with its shot/RIN/Johnson plateau split (from the analysis
 ``NeaBudget``). Long series are decimated before drawing. The richer
 input-vs-recovered spectral overlay and the spectrogram live in the (matplotlib)
 Report tab, so this tab stays light and fast.
+
+A row of checkboxes (task S7-mod §4) shows/hides each panel; hiding a panel
+**reflows** the layout so the visible panels expand to fill the freed space (the
+panels live in one :class:`pyqtgraph.GraphicsLayoutWidget`, re-added in order on
+each toggle). The cantilever animation is a separate widget and is toggled with
+``setVisible``. The selection is session-only (not persisted).
 """
 
 from __future__ import annotations
@@ -15,7 +21,7 @@ from __future__ import annotations
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QSplitter, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QSplitter, QVBoxLayout, QWidget
 
 from optivibe.analysis import NeaBudget
 from optivibe.core.types import FloatArray, VibrationResult
@@ -26,6 +32,16 @@ __all__ = ["LiveView"]
 
 _G0 = 9.80665
 _MAX_POINTS = 4000
+
+# Panel key -> checkbox label (order defines the top-to-bottom layout).
+_PANEL_LABELS: tuple[tuple[str, str], ...] = (
+    ("accel", "acceleration"),
+    ("det", "detector"),
+    ("vel", "velocity"),
+    ("disp", "displacement"),
+    ("spec", "spectrum"),
+    ("nea", "NEA(f)"),
+)
 
 
 def _decimate(*arrays: FloatArray, n_max: int = _MAX_POINTS) -> list[FloatArray]:
@@ -38,7 +54,7 @@ def _decimate(*arrays: FloatArray, n_max: int = _MAX_POINTS) -> list[FloatArray]
 
 
 class LiveView(QWidget):
-    """Composite live view: bending animation over stacked PyQtGraph panels.
+    """Composite live view: bending animation over toggleable PyQtGraph panels.
 
     Parameters
     ----------
@@ -51,7 +67,7 @@ class LiveView(QWidget):
         self._cantilever = CantileverView()
         self._plots = pg.GraphicsLayoutWidget()
 
-        self._p_accel = self._plots.addPlot(row=0, col=0, title="Acceleration: input vs recovered")
+        self._p_accel = pg.PlotItem(title="Acceleration: input vs recovered")
         self._p_accel.addLegend(offset=(-10, 5))
         self._accel_true = self._p_accel.plot(
             [], [], pen=pg.mkPen("#1f77b4", width=2), name="input"
@@ -61,26 +77,26 @@ class LiveView(QWidget):
         )
         self._p_accel.setLabel("left", "a", units="m/s^2")
 
-        self._p_det = self._plots.addPlot(row=1, col=0, title="Detector signal")
+        self._p_det = pg.PlotItem(title="Detector signal")
         self._det = self._p_det.plot([], [], pen=pg.mkPen("#2ca02c", width=1))
         self._p_det.setLabel("left", "samples")
 
-        self._p_vel = self._plots.addPlot(row=2, col=0, title="Recovered velocity")
+        self._p_vel = pg.PlotItem(title="Recovered velocity")
         self._vel = self._p_vel.plot([], [], pen=pg.mkPen("#9467bd", width=1))
         self._p_vel.setLabel("left", "v", units="m/s")
 
-        self._p_disp = self._plots.addPlot(row=3, col=0, title="Recovered displacement")
+        self._p_disp = pg.PlotItem(title="Recovered displacement")
         self._disp = self._p_disp.plot([], [], pen=pg.mkPen("#8c564b", width=1))
         self._p_disp.setLabel("left", "x", units="m")
         self._p_disp.setLabel("bottom", "time", units="s")
 
-        self._p_spec = self._plots.addPlot(row=4, col=0, title="Recovered amplitude spectrum")
+        self._p_spec = pg.PlotItem(title="Recovered amplitude spectrum")
         self._spec = self._p_spec.plot([], [], pen=pg.mkPen("#1f77b4", width=1))
         self._p_spec.setLabel("bottom", "frequency", units="Hz")
         self._p_spec.setLabel("left", "amplitude")
         self._p_spec.setLogMode(x=False, y=True)
 
-        self._p_nea = self._plots.addPlot(row=5, col=0, title="NEA(f) - run Report for the budget")
+        self._p_nea = pg.PlotItem(title="NEA(f) - run Report for the budget")
         self._p_nea.setLabel("bottom", "frequency", units="Hz")
         self._p_nea.setLabel("left", "NEA [ug/sqrt(Hz)]")
         self._p_nea.setLogMode(x=True, y=True)
@@ -90,6 +106,17 @@ class LiveView(QWidget):
         for plot in (self._p_accel, self._p_det, self._p_vel, self._p_disp, self._p_spec):
             plot.showGrid(x=True, y=True, alpha=0.3)
 
+        self._panels: dict[str, pg.PlotItem] = {
+            "accel": self._p_accel,
+            "det": self._p_det,
+            "vel": self._p_vel,
+            "disp": self._p_disp,
+            "spec": self._p_spec,
+            "nea": self._p_nea,
+        }
+        self._visible: dict[str, bool] = {key: True for key, _ in _PANEL_LABELS}
+        self._relayout()
+
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.addWidget(self._cantilever)
         splitter.addWidget(self._plots)
@@ -98,7 +125,46 @@ class LiveView(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self._visibility_bar())
         layout.addWidget(splitter)
+
+    # ------------------------------------------------------------------ #
+    # Panel visibility (task S7-mod §4)
+    # ------------------------------------------------------------------ #
+    def _visibility_bar(self) -> QWidget:
+        """Build the row of show/hide checkboxes (cantilever + each panel)."""
+        bar = QWidget()
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(2, 2, 2, 2)
+        self._checks: dict[str, QCheckBox] = {}
+
+        cantilever_check = QCheckBox("cantilever")
+        cantilever_check.setChecked(True)
+        cantilever_check.toggled.connect(self._cantilever.setVisible)
+        row.addWidget(cantilever_check)
+
+        for key, label in _PANEL_LABELS:
+            check = QCheckBox(label)
+            check.setChecked(True)
+            check.toggled.connect(lambda shown, k=key: self._set_panel_visible(k, shown))
+            self._checks[key] = check
+            row.addWidget(check)
+        row.addStretch(1)
+        return bar
+
+    def _set_panel_visible(self, key: str, shown: bool) -> None:
+        """Toggle a panel and reflow so the visible ones fill the space."""
+        self._visible[key] = shown
+        self._relayout()
+
+    def _relayout(self) -> None:
+        """Re-add the visible panels in order (true reflow, freeing space)."""
+        self._plots.clear()
+        row = 0
+        for key, _label in _PANEL_LABELS:
+            if self._visible[key]:
+                self._plots.addItem(self._panels[key], row=row, col=0)
+                row += 1
 
     def show_artifacts(self, artifacts: RunArtifacts, beta1_l: float) -> None:
         """Render a run's intermediates and recovered signals.

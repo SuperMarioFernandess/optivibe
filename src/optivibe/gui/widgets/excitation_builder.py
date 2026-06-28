@@ -9,9 +9,11 @@ validates -- the widget holds no signal logic, only the input fields (09 §9).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
@@ -54,6 +56,106 @@ def _spin(
     box.setSingleStep(step)
     box.setValue(value)
     return box
+
+
+@dataclass
+class _ToneRow:
+    """Widgets of one multitone component row."""
+
+    holder: QWidget
+    freq_spin: QDoubleSpinBox
+    amp_spin: QDoubleSpinBox
+    phase_spin: QDoubleSpinBox
+    phase_label: QLabel
+
+
+class _MultitoneForm(QWidget):
+    """Dynamic multitone editor: add/remove components with optional phase.
+
+    Defaults to two components (task S7-mod §3). The core accepts an arbitrary
+    number of tones (:class:`~optivibe.core.config.models.MultitoneSpec` has
+    ``min_length=1`` and no upper bound) and an optional per-tone phase, so this
+    widget needs no core change. A row collects ``[frequency_hz, amplitude_g]``
+    or, when *include phase* is checked, ``[frequency_hz, amplitude_g, phase_rad]``.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._rows: list[_ToneRow] = []
+        self._phase = QCheckBox("include per-tone phase")
+        self._phase.toggled.connect(self._on_phase_toggled)
+        self._add_button = QPushButton("+ component")
+        self._add_button.clicked.connect(lambda: self._add_row(240.0, 0.5, 0.0))
+
+        self._rows_box = QVBoxLayout()
+        self._rows_box.setContentsMargins(0, 0, 0, 0)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self._phase)
+        layout.addLayout(self._rows_box)
+        layout.addWidget(self._add_button)
+
+        self._add_row(120.0, 1.0, 0.0)
+        self._add_row(240.0, 0.5, 0.0)
+
+    def _add_row(self, freq: float, amp: float, phase: float) -> None:
+        """Append a tone row pre-filled with the given values."""
+        freq_spin = _spin(0.1, 1.0e5, freq, decimals=2, step=10.0)
+        amp_spin = _spin(1e-3, 200.0, amp, decimals=3, step=0.1)
+        phase_spin = _spin(-3.1416, 3.1416, phase, decimals=3, step=0.1)
+        phase_label = QLabel("phase [rad]")
+        remove = QPushButton("x")
+        remove.setMaximumWidth(28)
+
+        row_layout = QHBoxLayout()
+        row_layout.addWidget(QLabel("f [Hz]"))
+        row_layout.addWidget(freq_spin)
+        row_layout.addWidget(QLabel("amp [g]"))
+        row_layout.addWidget(amp_spin)
+        row_layout.addWidget(phase_label)
+        row_layout.addWidget(phase_spin)
+        row_layout.addWidget(remove)
+        holder = QWidget()
+        holder.setLayout(row_layout)
+
+        phase_label.setVisible(self._phase.isChecked())
+        phase_spin.setVisible(self._phase.isChecked())
+
+        entry = _ToneRow(holder, freq_spin, amp_spin, phase_spin, phase_label)
+        self._rows.append(entry)
+        self._rows_box.addWidget(holder)
+        remove.clicked.connect(lambda: self._remove_row(entry))
+
+    def _remove_row(self, entry: _ToneRow) -> None:
+        """Remove a tone row (keeping at least one component)."""
+        if len(self._rows) <= 1 or entry not in self._rows:
+            return
+        self._rows.remove(entry)
+        self._rows_box.removeWidget(entry.holder)
+        entry.holder.setParent(None)
+        entry.holder.deleteLater()
+
+    def _on_phase_toggled(self, checked: bool) -> None:
+        """Show or hide the per-tone phase controls."""
+        for entry in self._rows:
+            entry.phase_spin.setVisible(checked)
+            entry.phase_label.setVisible(checked)
+
+    def count(self) -> int:
+        """Return the number of components (exposed for tests)."""
+        return len(self._rows)
+
+    def tones(self) -> list[list[float]]:
+        """Collect the tones as ``[[f, a]]`` or ``[[f, a, phase]]`` lists."""
+        include_phase = self._phase.isChecked()
+        tones: list[list[float]] = []
+        for entry in self._rows:
+            tone = [entry.freq_spin.value(), entry.amp_spin.value()]
+            if include_phase:
+                tone.append(entry.phase_spin.value())
+            tones.append(tone)
+        return tones
 
 
 class ExcitationBuilder(QWidget):
@@ -111,20 +213,9 @@ class ExcitationBuilder(QWidget):
             self._form([("frequency [Hz]", self._sine_freq), ("amplitude [g]", self._sine_amp)])
         )
 
-        # multitone (three optional tone rows)
-        self._tone_freqs = [
-            _spin(0.1, 1.0e5, f, decimals=2, step=10.0) for f in (120.0, 240.0, 360.0)
-        ]
-        self._tone_amps = [_spin(0.0, 200.0, a, decimals=3, step=0.1) for a in (1.0, 0.5, 0.0)]
-        rows = []
-        for i, (f, a) in enumerate(zip(self._tone_freqs, self._tone_amps, strict=True), start=1):
-            row = QHBoxLayout()
-            row.addWidget(QLabel("f [Hz]"))
-            row.addWidget(f)
-            row.addWidget(QLabel("amp [g]"))
-            row.addWidget(a)
-            rows.append((f"tone {i}", self._wrap(row)))
-        self._stack.addWidget(self._form(rows))
+        # multitone (dynamic components: default 2, add/remove, optional phase)
+        self._multitone = _MultitoneForm()
+        self._stack.addWidget(self._multitone)
 
         # sweep / chirp
         self._sweep_f0 = _spin(0.1, 1.0e5, 20.0, decimals=2, step=10.0)
@@ -357,12 +448,7 @@ class ExcitationBuilder(QWidget):
             base["frequency_hz"] = self._sine_freq.value()
             base["amplitude_g"] = self._sine_amp.value()
         elif kind == "multitone":
-            tones = [
-                [f.value(), a.value()]
-                for f, a in zip(self._tone_freqs, self._tone_amps, strict=True)
-                if a.value() > 0.0
-            ]
-            base["tones"] = tones or [[self._tone_freqs[0].value(), 1.0]]
+            base["tones"] = self._multitone.tones()
         elif kind == "sweep":
             base["f_start_hz"] = self._sweep_f0.value()
             base["f_end_hz"] = self._sweep_f1.value()
