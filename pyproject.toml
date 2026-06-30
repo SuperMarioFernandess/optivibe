@@ -92,6 +92,12 @@ convention = "numpy"
 "tests/**" = ["D"]
 "examples/**" = ["D"]
 
+# Manual build tooling (S-DOC-2, doc 15 §6) is scripts, not library API:
+# relax docstrings like tests/examples; the figure generator carries intentional
+# Cyrillic UI/title strings, so allow the ambiguous-unicode lint there.
+"docs/manual/**" = ["D"]
+"docs/manual/figures/*" = ["D", "RUF001"]
+
 # --------------------------------------------------------------------------- #
 # mypy: strict typing for the library (doc 10 §3). Pydantic plugin enabled.
 # Heavy optional deps without complete stubs are treated as Any on import.
