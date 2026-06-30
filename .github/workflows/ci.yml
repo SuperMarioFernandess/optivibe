@@ -119,6 +119,10 @@ jobs:
       - name: Configure Pages
         if: github.ref == 'refs/heads/main'
         uses: actions/configure-pages@v5
+        with:
+          # First run enables Pages via API (Source = GitHub Actions) so the
+          # job does not 404 on a repo where Pages was never turned on.
+          enablement: true
 
       - name: Upload Pages artifact
         if: github.ref == 'refs/heads/main'
