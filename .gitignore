@@ -32,3 +32,10 @@ data/*
 *.swp
 .idea/
 .vscode/
+
+# docs/manual (S-DOC-2): version the modular SOURCE, not the build artefacts.
+# O-SW-09 decision — the .docx is built by `node docs/manual/build.mjs` (and an
+# optional CI job), never committed; figures and node_modules are generated.
+docs/manual/node_modules/
+docs/manual/OptiVibe_Руководство.docx
+docs/manual/figures/*.png

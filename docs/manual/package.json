@@ -1,0 +1,13 @@
+{
+  "name": "optivibe-manual",
+  "private": true,
+  "type": "module",
+  "version": "1.1.0",
+  "description": "Modular docx-js source of OptiVibe_Руководство.docx (doc 15 §6).",
+  "scripts": {
+    "build": "node build.mjs",
+    "figures": "python3 figures/build_figures.py",
+    "validate": "python3 validate.py OptiVibe_Руководство.docx"
+  },
+  "dependencies": { "docx": "^9.0.0" }
+}
