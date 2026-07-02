@@ -1,0 +1,14 @@
+# Built-in reflector preset: the *prototype* (POC) reflector -- a convex SPHERE
+# formed by arc-melting the bare fiber endface (doc 16 §3a R-1) with NO
+# metallization: bare-glass Fresnel reflectivity rho ~ 0.035 (doc 16 §3a R-2;
+# doc 03 §f' bare-mirror branch). The bias is ~0: the mating sleeve centers the
+# ferrules, so the working point sits at the eta peak (doc 16 §3a R-4) -- the
+# linear (1f) response is suppressed and the displacement response is quadratic
+# (2f). R_c and the gap are PLACEHOLDERS until the prototype is characterized
+# (doc 16 D-01/D-02); the qualitative L3 predictions of plan 19 do not depend
+# on their exact values. SI units throughout.
+shape: sphere
+curvature_radius_m: 62.5e-6   # PLACEHOLDER R_c until D-02 (melted-tip radius unknown)
+metallization_rho: 0.035      # bare glass Fresnel, NOT 0.98 (doc 16 §3a R-2)
+gap_m: 31.0e-6                # PLACEHOLDER air gap A until D-01 (assembly not surveyed)
+bias_offset_m: 0.0            # sleeve centering => working point at the eta peak (R-4)

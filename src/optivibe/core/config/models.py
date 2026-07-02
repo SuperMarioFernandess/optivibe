@@ -805,7 +805,7 @@ class ScenarioConfig(_Frozen):
     ----------
     name : str
         Scenario name.
-    variant : {"A", "B", "C", "D", "sphere_demo", "plane_demo", "wedge_demo"}
+    variant : {"A", "B", "C", "D", "sphere_demo", "plane_demo", "wedge_demo", "proto_poc"}
         Which variant preset to load from ``configs/variants``. A-D are the
         canonical sensor variants (doc 08); the ``*_demo`` compositions are the
         S9-B reflector-family demonstrations (sphere/plane/wedge), wideband
@@ -827,7 +827,7 @@ class ScenarioConfig(_Frozen):
     """
 
     name: str
-    variant: Literal["A", "B", "C", "D", "sphere_demo", "plane_demo", "wedge_demo"]
+    variant: Literal["A", "B", "C", "D", "sphere_demo", "plane_demo", "wedge_demo", "proto_poc"]
     excitation: ExcitationSpec
     stages: StageSelection = StageSelection()
     mechanics: MechanicsOptions = MechanicsOptions()

@@ -1,0 +1,35 @@
+# Variant proto_poc -- the DIGITAL-TWIN CONFIGURATION OF THE REAL PROTOTYPE
+# (doc 16 §3a; plan 19 §L3, experiment E1): convex sphere from the arc-melted
+# bare endface (R-1) + bare-glass rho ~ 0.035 (R-2) + single-ended detector
+# (R-3) + bias ~ 0 (sleeve centering, R-4); intensity read-out => route 2
+# applies (R-5). Geometry (L, gap A, R_c) and source figures are PLACEHOLDERS
+# until the prototype is characterized (doc 16 D-01..D-03): until then the
+# variant supports the *qualitative* L3 predictions only (2f response at
+# bias ~ 0, RIN-limited floor, sign/order of s_target once a bias is applied).
+# Not part of the A-D golden. SI except named-unit fields.
+name: proto_poc
+description: digital twin of the POC prototype (sphere, bare, single-ended, bias~0)
+mode: offresonance
+band:
+  f_min_hz: 0.1
+  f_max_hz: 2000.0
+full_scale_g: 50.0
+route: 2
+eta_bias: 0.25
+q_total: 2610.0           # PLACEHOLDER until D-01 fixes L (and 16 M-02 gives Q(L))
+target_nea_ug_rthz: null  # no NEA target: POC is characterized, not optimized
+vacuum: false
+source:
+  preset: sld
+  overrides:
+    power_w: 0.030        # PLACEHOLDER ~30 mW nameplate (doc 16 §3; D-03 to confirm)
+fiber:
+  preset: smf28
+cantilever:
+  preset: silica
+  overrides:
+    length_m: 4.0e-3      # PLACEHOLDER "a few mm" free fiber (doc 16 §3; D-01 to measure)
+reflector:
+  preset: sphere_bare_poc
+detector:
+  preset: single_ended

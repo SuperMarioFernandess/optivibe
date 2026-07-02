@@ -1,0 +1,14 @@
+# Built-in detector preset: SINGLE-ENDED photodiode (no balanced/reference
+# channel) -- the prototype (POC) read-out of doc 16 §3a R-3. With
+# balanced: false the source RIN enters the noise budget unsuppressed
+# (doc 07 §1.2), so the noise floor is RIN-limited rather than shot-limited --
+# one of the falsifiable L3 predictions of plan 19. cmrr_db is inert while the
+# balanced channel is off (kept at the platform value for easy A/B switching).
+# adc_full_scale is in the output units (A here).
+responsivity: 1.0            # PD responsivity R, A/W (doc 07 §2; PLACEHOLDER until D-03)
+balanced: false              # single detector, no reference arm (doc 16 §3a R-3)
+cmrr_db: 40.0                # inert while balanced=false (doc 07 §1.2)
+transimpedance_ohm: 1.0e5    # feedback resistor Rf, ohm (doc 07 §1.3)
+output: current              # digitize photocurrent (A)
+adc_bits: 24                 # ADC resolution, bits (doc 07 §1.4)
+adc_full_scale: 1.3e-4       # +/- range, A

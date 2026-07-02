@@ -1,0 +1,25 @@
+# Prototype (POC) falsifiable prediction #1 (plan 19 §L3, E1-P1): with the
+# sleeve-centered working point at the eta PEAK (bias ~ 0, doc 16 §3a R-4) the
+# response to a transverse tone is QUADRATIC -- the dominant line sits at
+# 2f = 240 Hz, the 1f line is suppressed, and the 2f amplitude scales as the
+# drive amplitude squared. Introducing a controlled bias (doc 16 D-05) must
+# bring the 1f line back -- the bench replication of this scenario is the first
+# cheap validation test of the twin against the real prototype.
+# Run from the repo root:  optivibe run examples/proto_poc_2f.yaml
+name: proto-poc-2f
+variant: proto_poc
+
+excitation:
+  kind: sine
+  axis: x                  # any transverse axis: the sphere is isotropic (R-1)
+  fs_hz: 5000.0
+  duration_s: 1.0
+  frequency_hz: 120.0
+  amplitude_g: 10.0
+
+stages:
+  excitation: sine
+  mechanics: modal
+  optics: reflector        # shape-dispatching optics; sphere via the variant
+
+seed: 12345
