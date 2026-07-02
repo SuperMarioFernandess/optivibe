@@ -169,6 +169,55 @@ def test_nea_budget_displacement_floor_low_frequency_dominated(
     assert low_var / total_var > 0.9  # > 90 % of the x-variance is in the lowest decade
 
 
+@pytest.mark.golden
+def test_analytic_point_dynamic_range_identity(constants: Constants, config_dir: Path) -> None:
+    """DR follows its doc 17 §1 definition ``FS / (full-band noise floor)`` (plan 18, G2).
+
+    For every variant: ``DR_dB = 20 log10(FS_g * g0 / NEA_full_band)`` where
+    ``NEA_full_band = NEA_plateau * sqrt(B)`` over the *design band* of the variant.
+    Pins the bandwidth convention of ``analytic_point`` (band = f_max - f_min).
+    """
+    for name in ("A", "B", "C", "D"):
+        variant = load_variant(name, config_dir)
+        point = analytic_point(variant, constants)
+        band = variant.band.f_max_hz - variant.band.f_min_hz
+        assert point.bandwidth_hz == pytest.approx(band, rel=1e-12)
+        assert point.nea_full_band == pytest.approx(point.nea_plateau * np.sqrt(band), rel=1e-12)
+        dr_expected = 20.0 * np.log10(variant.full_scale_g * G0 / point.nea_full_band)
+        assert point.dynamic_range_db == pytest.approx(dr_expected, rel=1e-12)
+        assert np.isfinite(point.dynamic_range_db) and point.dynamic_range_db > 0.0
+
+
+@pytest.mark.golden
+def test_nea_full_band_consistent_with_spectrum(
+    variant_b: VariantConfig, constants: Constants
+) -> None:
+    """The full-band NEA agrees with the integral of the NEA spectrum (plan 18, G3).
+
+    ``sqrt(int NEA(f)^2 df)`` over the design band matches the plateau figure
+    ``NEA_plateau * sqrt(B)`` within 10 % (the |D(f)| dip toward f1 makes the
+    integral slightly *lower*). Also pins the two bandwidth conventions:
+    ``NeaBudget.nea_full_band`` uses the run's Nyquist bandwidth (``fs/2``) while
+    ``AnalyticPoint.nea_full_band`` uses the variant design band -- same field
+    name, different meaning (documented in doc 18 §5).
+    """
+    art = _run(variant_b, 200.0, 0.01)
+    budget = nea_budget(art.forward.detector, variant_b, constants)
+    assert budget is not None
+    integral = float(np.sqrt(np.trapezoid(budget.nea_density**2, budget.freq_hz)))
+    band = variant_b.band.f_max_hz - variant_b.band.f_min_hz
+    plateau_full_band = budget.nea_plateau * np.sqrt(band)
+    assert integral == pytest.approx(plateau_full_band, rel=0.10)
+    assert integral < plateau_full_band  # |D(f)| dip toward f1 lowers the integral
+    # Bandwidth conventions pinned (silent change would break either identity).
+    nyquist_bw = art.forward.detector.fs / 2.0
+    assert budget.nea_full_band == pytest.approx(
+        budget.nea_plateau * np.sqrt(nyquist_bw), rel=1e-12
+    )
+    point = analytic_point(variant_b, constants)
+    assert point.nea_full_band == pytest.approx(plateau_full_band, rel=1e-12)
+
+
 def test_nea_budget_none_for_stub(variant_b: VariantConfig, constants: Constants) -> None:
     """A noiseless stub detector yields no NEA budget."""
     excitation = SineSpec(

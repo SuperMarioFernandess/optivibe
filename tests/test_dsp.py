@@ -37,6 +37,7 @@ from optivibe.dsp import (
     amplitude_spectrum,
     analytic_noise_psd,
     calibrate_acceleration,
+    classify_velocity_rms,
     cross_axis_suppression,
     dominant_frequencies,
     integrate_frequency,
@@ -47,6 +48,7 @@ from optivibe.dsp import (
     target_sensitivity_via_multiplier,
     welch_psd,
 )
+from optivibe.dsp.iso import ISO_10816_3_ZONES
 from optivibe.excitation import EXCITATION_REGISTRY
 from optivibe.mechanics.modal import ModalFrequencyMechanics
 from optivibe.optics.cylinder import CylinderOptics
@@ -297,6 +299,35 @@ def test_iso_assessment_present(variant_b: VariantConfig, dsp: StandardDsp) -> N
     assert result.iso is not None
     assert result.iso["zone"] in {"A", "B", "C", "D"}
     assert "ISO" in str(result.iso["standard"])
+
+
+@pytest.mark.golden
+def test_iso_zone_boundaries_match_published_table() -> None:
+    """The classifier reproduces the published ISO 10816-3 zone limits (plan 18, G1).
+
+    For every machine class the velocity just below / exactly at / just above each
+    boundary lands in the documented zone. Boundary convention pinned: a velocity
+    exactly at a limit belongs to the *lower* zone (``v <= limit``).
+    """
+    # Published boundaries (mm/s) -- reference data of the standard, doc 17 §5.
+    published = {
+        "group1_rigid": (2.3, 4.5, 7.1),
+        "group1_flexible": (3.5, 7.1, 11.0),
+        "group2_rigid": (1.4, 2.8, 4.5),
+        "group2_flexible": (2.3, 4.5, 7.1),
+    }
+    assert set(ISO_10816_3_ZONES) == set(published)
+    eps = 1.0e-9
+    for key, (ab, bc, cd) in published.items():
+        limits = ISO_10816_3_ZONES[key]
+        assert (limits.a_b_mm_s, limits.b_c_mm_s, limits.c_d_mm_s) == (ab, bc, cd)
+        assert classify_velocity_rms(ab - eps, limits) == "A"
+        assert classify_velocity_rms(ab, limits) == "A"  # boundary -> lower zone
+        assert classify_velocity_rms(ab + eps, limits) == "B"
+        assert classify_velocity_rms(bc, limits) == "B"
+        assert classify_velocity_rms(bc + eps, limits) == "C"
+        assert classify_velocity_rms(cd, limits) == "C"
+        assert classify_velocity_rms(cd + eps, limits) == "D"
 
 
 # --------------------------------------------------------------------------- #

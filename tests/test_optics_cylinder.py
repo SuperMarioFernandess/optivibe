@@ -399,6 +399,44 @@ def test_integration_thd_grows_past_linearity_boundary(model_b: CylinderOpticsMo
     assert levels[0] < levels[1] < levels[2]
 
 
+@pytest.mark.golden
+def test_golden_thd_matches_analytic_second_harmonic(model_b: CylinderOpticsModel) -> None:
+    """Small-signal HD2 of eta(dx sine) matches the Taylor prediction (plan 18, G4).
+
+    For ``eta(x)`` around the working point, a sine ``x = d sin(wt)`` produces a
+    second harmonic with amplitude ratio ``HD2 = |eta''| d / (4 |eta'|)`` (second
+    order Taylor term ``eta'' x^2/2`` with ``sin^2 -> cos 2wt / 2``; doc 03 §5).
+    The measured ratio from the simulated eta series agrees within 2 % at
+    ``d = 50 nm`` (well inside the ~0.5 um small-signal boundary).
+    """
+    fs, freq, n_cycles = 51200.0, 100.0, 64
+    amplitude_m = 50.0e-9
+    t = np.arange(round(n_cycles * fs / freq)) / fs
+    dx = amplitude_m * np.sin(2.0 * np.pi * freq * t)
+    zeros = np.zeros_like(dx)
+    eta_x, eta_y = model_b.eta_components(dx, zeros, zeros, zeros, zeros)
+    eta = eta_x * eta_y
+
+    n = eta.size
+    spectrum = np.abs(np.fft.rfft(eta - np.mean(eta)))
+    fundamental_bin = round(freq * n / fs)
+    hd2_measured = float(spectrum[2 * fundamental_bin] / spectrum[fundamental_bin])
+
+    # Analytic reference: central finite differences of eta(x) at the working point.
+    step = 1.0e-9
+
+    def eta_at(x: float) -> float:
+        point = np.array([x], dtype=np.float64)
+        zero = np.zeros(1, dtype=np.float64)
+        ex, ey = model_b.eta_components(point, zero, zero, zero, zero)
+        return float((ex * ey)[0])
+
+    slope = (eta_at(step) - eta_at(-step)) / (2.0 * step)
+    curvature = (eta_at(step) - 2.0 * eta_at(0.0) + eta_at(-step)) / step**2
+    hd2_analytic = abs(curvature) * amplitude_m / (4.0 * abs(slope))
+    assert hd2_measured == pytest.approx(hd2_analytic, rel=0.02)
+
+
 # --------------------------------------------------------------------------- #
 # Regression: registry, scenarios, viz smoke.
 # --------------------------------------------------------------------------- #
