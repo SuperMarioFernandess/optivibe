@@ -51,10 +51,12 @@ from optivibe.dsp.nea import (
     NeaResult,
     analytic_noise_psd,
     nea_from_detector,
+    nea_from_psd,
     nea_spectrum,
 )
 from optivibe.dsp.sensitivity import (
     SENSITIVITY_REGISTRY,
+    MeasuredSensitivity,
     NonlinearCurveSensitivity,
     OperatingPointSensitivity,
     Sensitivity,
@@ -83,6 +85,7 @@ __all__ = [
     "DSP_REGISTRY",
     "INTEGRATOR_REGISTRY",
     "SENSITIVITY_REGISTRY",
+    "MeasuredSensitivity",
     "NeaResult",
     "NonlinearCurveSensitivity",
     "OperatingPointSensitivity",
@@ -107,6 +110,7 @@ __all__ = [
     "integrate_time",
     "iso_assessment",
     "nea_from_detector",
+    "nea_from_psd",
     "nea_spectrum",
     "recover_acceleration_3d",
     "rms",

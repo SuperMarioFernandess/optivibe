@@ -12,6 +12,10 @@ Subcommands
 ``sweep <spec.yaml>``
     Run a parameter sweep or a tolerance Monte-Carlo from its spec, print a
     summary, and persist the result (``.npz``) and figures (task S6 §B7/§B8/§B9).
+``analyze <spec.yaml>``
+    Analyze a recorded real-instrument output (photocurrent record + instrument
+    config -> the 17 §1 metrics through the standard inverse chain, bypassing
+    the forward model): role S-02, doc 20 §5.
 """
 
 from __future__ import annotations
@@ -25,9 +29,12 @@ from pathlib import Path
 from matplotlib.figure import Figure
 
 from optivibe.analysis import (
+    InstrumentAnalysis,
     MonteCarloSpec,
     SweepSpec,
+    analyze_record,
     load_analysis_spec,
+    load_analyze_spec,
     nea_budget,
     run_monte_carlo,
     run_sweep,
@@ -79,6 +86,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--out", type=Path, default=None, help="output directory for results (npz) and figures"
     )
     sweep_p.set_defaults(func=_cmd_sweep)
+
+    analyze_p = sub.add_parser(
+        "analyze", help="analyze a recorded instrument output (role S-02, doc 20 §5)"
+    )
+    analyze_p.add_argument(
+        "spec", type=Path, help="path to an analyze spec YAML (record + variant + calibration)"
+    )
+    analyze_p.add_argument(
+        "--record",
+        type=Path,
+        default=None,
+        help="override the record data-file path of the spec (batch of captures)",
+    )
+    analyze_p.add_argument(
+        "--config-dir", type=Path, default=None, help="override the configs/ dir"
+    )
+    analyze_p.set_defaults(func=_cmd_analyze)
     return parser
 
 
@@ -209,6 +233,65 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
     if isinstance(spec, SweepSpec):
         return _report_sweep(spec, args.out)
     return _report_monte_carlo(spec, args.out)
+
+
+def _format_analysis(analysis: InstrumentAnalysis) -> str:
+    """Render a human-readable summary of an instrument-output analysis (S-02)."""
+    meta = analysis.meta
+    dominant = ", ".join(f"{f:.3f}" for f in analysis.dominant_freqs_hz) or "-"
+    fs_hz = float(str(meta.get("fs_hz", 0.0)))
+    lines = [
+        f"record   : {meta.get('path', '?')} ({meta.get('loader', '?')}, "
+        f"ts {meta.get('timestamp', '?')})",
+        f"variant  : {meta.get('variant', '?')}",
+        f"samples  : {meta.get('n_samples', '?')}  @ fs = {fs_hz:.1f} Hz",
+        f"dominant : {dominant} Hz",
+        f"I_AC rms : {analysis.i_ac_rms_a:.4g} A",
+    ]
+    if analysis.second_harmonic_ratio is not None:
+        lines.append(f"2f/1f    : {analysis.second_harmonic_ratio:.4g}")
+    if analysis.s_target_bench_estimate is not None:
+        lines.append(
+            f"bench estimate : {analysis.s_target_bench_estimate:.4g} A/(m/s^2) "
+            f"(reference rms {analysis.reference_rms_m_s2:.4g} m/s^2)"
+        )
+    if analysis.calibration is None:
+        lines.append("calibration : none -- scale-free metrics only (20 §5)")
+        return "\n".join(lines)
+    cal = analysis.calibration
+    lines.append(
+        f"calibration : {cal.get('source')}  s_target = "
+        f"{float(str(cal.get('s_target_a_per_m_s2'))):.4g} A/(m/s^2)"
+    )
+    result = analysis.result
+    if result is not None:
+        rms_text = ", ".join(f"{k}={v:.4g}" for k, v in sorted(result.rms.items()))
+        lines.append(f"rms      : {rms_text}")
+        if result.iso is not None:
+            zone = result.iso.get("zone", "?")
+            v_mm_s = result.iso.get("v_rms_mm_s", float("nan"))
+            lines.append(f"ISO      : zone {zone} (v_rms = {float(str(v_mm_s)):.4g} mm/s)")
+    if analysis.nea_full_band_m_s2 is not None:
+        lines.append(
+            f"NEA      : full band {analysis.nea_full_band_m_s2 / G0 * 1e6:.4g} ug "
+            f"(sqrt-integral over the variant band, referred PSD)"
+        )
+    return "\n".join(lines)
+
+
+def _cmd_analyze(args: argparse.Namespace) -> int:
+    """Execute the ``analyze`` subcommand (role S-02)."""
+    try:
+        spec = load_analyze_spec(args.spec)
+        if args.record is not None:
+            record = spec.record.model_copy(update={"path": str(args.record)})
+            spec = spec.model_copy(update={"record": record})
+        analysis = analyze_record(spec, config_dir=args.config_dir)
+    except (FileNotFoundError, ValueError) as exc:
+        logger.error("analyze failed: %s", exc)
+        return 2
+    sys.stdout.write(_format_analysis(analysis) + "\n")
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:

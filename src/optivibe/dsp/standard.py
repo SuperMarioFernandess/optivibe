@@ -26,7 +26,7 @@ from optivibe.dsp.iso import iso_assessment
 from optivibe.dsp.kinematics import INTEGRATOR_REGISTRY
 from optivibe.dsp.metrics import band_rms_velocity, rms, second_harmonic_ratio
 from optivibe.dsp.nea import nea_from_detector
-from optivibe.dsp.sensitivity import build_sensitivity_model
+from optivibe.dsp.sensitivity import SensitivityModel, build_sensitivity_model
 from optivibe.dsp.spectra import amplitude_spectrum, dominant_frequencies, welch_psd
 from optivibe.mechanics.cantilever import CantileverModel
 
@@ -48,10 +48,25 @@ class StandardDsp:
         Physical constants; loaded once from ``configs/constants.yaml`` when
         ``None`` (the only I/O, performed at construction, like the other
         physical stages).
+    sensitivity_model : SensitivityModel or None, optional
+        Injected sensitivity strategy (role S-02, doc 20 §5). ``None`` (the
+        default -- and the only value the scenario registry ever passes) keeps
+        the v1 behaviour bit-for-bit: the model is resolved from the DSP
+        options per run. The S-02 analyzer injects a
+        :class:`~optivibe.dsp.sensitivity.MeasuredSensitivity` here so a real
+        photocurrent record runs through the *same* inverse chain with a bench
+        scalar -- the optics-model scalar is bypassed, not generalized
+        (boundary G9, doc 18 §4.2).
     """
 
-    def __init__(self, *, constants: Constants | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        constants: Constants | None = None,
+        sensitivity_model: SensitivityModel | None = None,
+    ) -> None:
         self._constants = load_constants() if constants is None else constants
+        self._sensitivity_model = sensitivity_model
 
     def run(
         self, detector: DetectorOutput, variant: VariantConfig, options: DspOptions
@@ -79,7 +94,13 @@ class StandardDsp:
 
         # 1. Calibration: detector samples -> acceleration through the selected
         #    sensitivity model (SW-33 axis B; defaults reproduce v1 exactly).
-        model = build_sensitivity_model(variant, options, self._constants)
+        #    An injected model (role S-02, measured bench scalar) takes
+        #    precedence; the scenario path always constructs with None.
+        model = (
+            self._sensitivity_model
+            if self._sensitivity_model is not None
+            else build_sensitivity_model(variant, options, self._constants)
+        )
         accel, _s_target = calibrate_acceleration(detector, variant, self._constants, model=model)
         # Axis C: roll up the plateau by D(f) near f1 (legacy deconvolve_hlat flag
         # or sensitivity_freq="dynamic" — same correction; default plateau = no-op).

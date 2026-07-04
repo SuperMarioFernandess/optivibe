@@ -26,13 +26,14 @@ from __future__ import annotations
 import math
 
 import numpy as np
+import numpy.typing as npt
 
 from optivibe.core.config.models import Constants, VariantConfig
-from optivibe.core.types import DetectorOutput, FloatArray
+from optivibe.core.types import DetectorOutput, FloatArray, Spectrum
 from optivibe.detector.photodiode import noise_psd
 from optivibe.dsp.calibration import dynamic_sensitivity, target_sensitivity
 
-__all__ = ["NeaResult", "analytic_noise_psd", "nea_from_detector", "nea_spectrum"]
+__all__ = ["NeaResult", "analytic_noise_psd", "nea_from_detector", "nea_from_psd", "nea_spectrum"]
 
 
 class NeaResult:
@@ -167,6 +168,52 @@ def nea_spectrum(
     psd_total = float(noise["psd_total_a2_hz"])  # type: ignore[arg-type]
     s_f = dynamic_sensitivity(variant, freq_hz, constants)
     out: FloatArray = math.sqrt(psd_total) / np.abs(s_f)
+    return np.ascontiguousarray(out, dtype=np.float64)
+
+
+def nea_from_psd(psd: Spectrum, s_target_f: npt.ArrayLike) -> FloatArray:
+    """Refer a *measured* current PSD to the input as NEA(f) (doc 05 §7; S-02).
+
+    The same referral formula as :func:`nea_spectrum`,
+    ``NEA(f) = sqrt(S_I(f)) / |s_target(f)|``, but taking a **measured** PSD of
+    a recorded photocurrent (role S-02, doc 20 §5) instead of the white
+    metadata floor of the synthetic detector. On a quiet record the result is
+    the instrument's input-referred noise floor; on a driven record the signal
+    lines appear on top of it (the PSD is referred as-is, honestly).
+
+    Parameters
+    ----------
+    psd : Spectrum
+        One-sided current PSD of the recorded photocurrent (``kind="psd"``),
+        A^2/Hz (e.g. from :func:`~optivibe.dsp.spectra.welch_psd`).
+    s_target_f : array_like
+        Through sensitivity at each PSD frequency, A/(m/s^2): a signed scalar
+        for the plateau, or a complex ``s_target^QS * D(f)`` array matching
+        ``psd.freq`` for the dynamic referral (doc 05 §2b).
+
+    Returns
+    -------
+    numpy.ndarray
+        NEA density at each PSD frequency, (m/s^2)/sqrt(Hz).
+
+    Raises
+    ------
+    ValueError
+        If ``psd`` is not a PSD spectrum, the sensitivity magnitude vanishes
+        anywhere (degenerate working point), or an array sensitivity does not
+        match the PSD grid.
+    """
+    if psd.kind != "psd":
+        msg = f"nea_from_psd expects a PSD spectrum, got kind={psd.kind!r}"
+        raise ValueError(msg)
+    s_abs = np.abs(np.atleast_1d(np.asarray(s_target_f)))
+    if s_abs.size not in (1, psd.freq.size):
+        msg = f"s_target_f length {s_abs.size} does not match the PSD grid {psd.freq.size}"
+        raise ValueError(msg)
+    if not np.all(s_abs > 0.0):
+        msg = "s_target magnitude must be positive everywhere (degenerate working point)"
+        raise ValueError(msg)
+    out: FloatArray = np.sqrt(np.maximum(psd.values, 0.0)) / s_abs
     return np.ascontiguousarray(out, dtype=np.float64)
 
 

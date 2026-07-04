@@ -5,10 +5,19 @@ simulation spec (11 §4): the end-to-end ``truth vs recovery`` error budget, the
 NEA budget with its contribution split and displacement floor, parameter sweeps
 (design and response) and the tolerance Monte-Carlo. Spectra and metrics are
 computed here (or in :mod:`optivibe.dsp`); ``viz`` only draws them (14 §8).
+Role S-02 (doc 20 §5) adds :mod:`optivibe.analysis.instrument`: the analyzer of
+recorded real-instrument output, reusing the same DSP tract (17 §7).
 """
 
 from __future__ import annotations
 
+from optivibe.analysis.instrument import (
+    AnalyzeSpec,
+    CalibrationSpec,
+    InstrumentAnalysis,
+    analyze_record,
+    load_analyze_spec,
+)
 from optivibe.analysis.io import (
     load_analysis_spec,
     save_monte_carlo_npz,
@@ -28,8 +37,11 @@ from optivibe.analysis.variant_tools import AnalyticPoint, analytic_point, with_
 
 __all__ = [
     "AnalyticPoint",
+    "AnalyzeSpec",
     "AxisGrid",
+    "CalibrationSpec",
     "ErrorBudget",
+    "InstrumentAnalysis",
     "MonteCarloResult",
     "MonteCarloSpec",
     "NeaBudget",
@@ -37,7 +49,9 @@ __all__ = [
     "SweepSpec",
     "ToleranceSpec",
     "analytic_point",
+    "analyze_record",
     "load_analysis_spec",
+    "load_analyze_spec",
     "nea_budget",
     "run_monte_carlo",
     "run_sweep",

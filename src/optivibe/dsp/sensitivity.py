@@ -65,6 +65,7 @@ DEFAULT_ETA_RATIO = 0.37
 __all__ = [
     "DEFAULT_ETA_RATIO",
     "SENSITIVITY_REGISTRY",
+    "MeasuredSensitivity",
     "NonlinearCurveSensitivity",
     "OperatingPointSensitivity",
     "Sensitivity",
@@ -257,6 +258,53 @@ class StaticSensitivity(_LinearSensitivity):
 
     def __init__(self, variant: VariantConfig, constants: Constants) -> None:
         super().__init__(variant, constants, target_sensitivity(variant, constants))
+
+
+class MeasuredSensitivity(_LinearSensitivity):
+    """Externally *measured* plateau scalar (role S-02; plans 19 §3.3 / 20 §5).
+
+    The signed plateau ``s_target^QS`` is **supplied** (a bench figure from
+    experiment E-3, ISO 16063-21, or an estimate via
+    :func:`~optivibe.dsp.calibration.bench_sensitivity`), not computed from the
+    optics model, so the strategy works for *any* reflector shape -- the
+    model-based scalar stays cylinder-only (boundary G9, doc 18 §4.2; this
+    class deliberately does not generalize it). The dynamic roll-up ``D(f)``
+    still comes from the variant's cantilever (shape-agnostic mechanics), so
+    axis C keeps working.
+
+    Not registered in :data:`SENSITIVITY_REGISTRY`: the registry keys mirror the
+    ``DspOptions.sensitivity_model`` literals of the simulation scenarios; the
+    measured scalar is injected by the S-02 analyzer
+    (:func:`optivibe.analysis.instrument.analyze_record`) through the
+    ``StandardDsp`` constructor.
+
+    Parameters
+    ----------
+    variant : VariantConfig
+        Sensor variant (provides the cantilever for ``D(f)``).
+    constants : Constants
+        Physical constants.
+    s_target_a_per_m_s2 : float
+        The signed measured plateau sensitivity, A/(m/s^2). Must be finite and
+        non-zero (the sign carries the slope inversion, doc 05 §2).
+
+    Raises
+    ------
+    ValueError
+        If the supplied sensitivity is zero or non-finite.
+    """
+
+    def __init__(
+        self, variant: VariantConfig, constants: Constants, s_target_a_per_m_s2: float
+    ) -> None:
+        s_target = float(s_target_a_per_m_s2)
+        if not math.isfinite(s_target) or s_target == 0.0:
+            msg = (
+                f"measured s_target must be a finite non-zero signed scalar, "
+                f"got {s_target_a_per_m_s2!r} (doc 05 §2; role S-02)"
+            )
+            raise ValueError(msg)
+        super().__init__(variant, constants, s_target)
 
 
 class OperatingPointSensitivity(_LinearSensitivity):
