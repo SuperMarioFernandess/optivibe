@@ -39,3 +39,9 @@ data/*
 docs/manual/node_modules/
 docs/manual/OptiVibe_Руководство.docx
 docs/manual/figures/*.png
+
+# docs/theory (SW-53): version the Markdown+LaTeX SOURCE, not the build.
+# O-SW-04/O-SW-09 — HTML built locally by `python docs/theory/tools/build_theory.py`,
+# never committed; the vendored (offline) MathJax runtime is not committed either.
+docs/theory/_build/
+docs/theory/tools/mathjax/
