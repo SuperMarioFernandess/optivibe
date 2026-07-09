@@ -9,15 +9,19 @@ derivation constructs used in the blocks.
 
 Rendering is delegated to ``pandoc`` (the same toolchain family the manual uses
 for its ``.docx``). To stay CDN-free the MathJax runtime must be *vendored*
-locally under ``tools/mathjax/`` (e.g. ``tex-mml-chtml.js``); ``pandoc
---embed-resources --standalone --mathjax=<local>`` then inlines it into the
-output HTML.
+locally under ``tools/mathjax/`` as ``tex-svg.js`` (fetched once by
+``tools/fetch_mathjax.py``); ``pandoc --embed-resources --standalone
+--mathjax=<local>`` then inlines it into the output HTML. The **SVG** bundle is
+used (not ``tex-mml-chtml.js``): the CHTML renderer loads fonts dynamically at
+runtime and is therefore *not* self-contained offline, while the SVG renderer
+needs no external resources at all.
 
 Outputs are **local artefacts** and are not versioned (mirrors the O-SW-09 rule
 for the manual ``.docx``; add ``docs/theory/_build/`` to ``.gitignore``).
 
 Usage
 -----
+    python docs/theory/tools/fetch_mathjax.py           # once: vendor MathJax
     python docs/theory/tools/build_theory.py            # build all blocks
     python docs/theory/tools/build_theory.py 01_sensing_element.md
 
@@ -35,7 +39,7 @@ from pathlib import Path
 
 THEORY_DIR = Path(__file__).resolve().parent.parent
 BUILD_DIR = THEORY_DIR / "_build"
-MATHJAX = THEORY_DIR / "tools" / "mathjax" / "tex-mml-chtml.js"
+MATHJAX = THEORY_DIR / "tools" / "mathjax" / "tex-svg.js"
 
 
 def _markdown_sources(names: list[str]) -> list[Path]:
@@ -80,11 +84,17 @@ def _pandoc_command(source: Path, target: Path) -> list[str]:
         "--standalone",
         "--embed-resources",
         "--metadata=lang:ru",
+        f"--metadata=title:{source.stem}",
         "--output",
         str(target),
     ]
-    # Vendored MathJax keeps the HTML offline/self-contained (no CDN).
-    cmd.append(f"--mathjax={MATHJAX}" if MATHJAX.is_file() else "--mathjax")
+    # Vendored MathJax keeps the HTML offline/self-contained (no CDN). A bare
+    # ``--mathjax`` fallback is deliberately NOT used: combined with
+    # ``--embed-resources`` pandoc tries to inline MathJax from a system path
+    # that usually does not exist and the build fails opaquely (root cause of
+    # the 2026-07 breakage). ``build`` refuses early with a clear message
+    # instead; run ``fetch_mathjax.py`` once to vendor the runtime.
+    cmd.append(f"--mathjax={MATHJAX}")
     return cmd
 
 
@@ -106,11 +116,13 @@ def build(names: list[str]) -> int:
         return 1
     if not MATHJAX.is_file():
         print(
-            f"note: vendored MathJax not found at {MATHJAX}; "
-            "output will reference a CDN and is NOT offline-self-contained "
-            "(vendor tex-mml-chtml.js to satisfy the addendum)",
+            f"vendored MathJax not found at {MATHJAX}: run "
+            "`python docs/theory/tools/fetch_mathjax.py` once (fetches the "
+            "mathjax npm package and vendors es5/tex-svg.js), then re-run "
+            "this build",
             file=sys.stderr,
         )
+        return 1
     BUILD_DIR.mkdir(exist_ok=True)
     for source in _markdown_sources(names):
         if not source.is_file():
