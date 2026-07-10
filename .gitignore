@@ -45,3 +45,4 @@ docs/manual/figures/*.png
 # never committed; the vendored (offline) MathJax runtime is not committed either.
 docs/theory/_build/
 docs/theory/tools/mathjax/
+docs/theory/*.docx
