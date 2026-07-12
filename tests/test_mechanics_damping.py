@@ -134,20 +134,25 @@ def test_golden_q_total_nonmonotonic_peak(constants: Constants) -> None:
 
 
 @pytest.mark.golden
-def test_golden_q_model_reproduces_variant_bcd_numbers(constants: Constants) -> None:
-    """The model reproduces the tabulated B/C/D ``q_total`` numbers (O-SW-06).
+def test_golden_q_model_vs_tabulated_variant_numbers(constants: Constants) -> None:
+    """The model against the previously tabulated A-D numbers (R-48 audit trail).
 
-    B: 2610 at L = 2.0 mm (doc 07 §4.3 / 08 §3.B peak); C: 1950 at 1.41 mm
-    (doc 07 §2.3, R-26); D: 1500 at 4.47 mm -- the documented *air* value
-    (O-SW-06). Variant A's 1430 (a 1/L scaling, not a model value) is NOT
-    reproduced -- the model gives ~1297 at 5 mm; changing A.yaml is a resolved-
-    contract change and is escalated, not silently applied (see the journal).
+    B (2610 at L = 2.0 mm, doc 07 §4.3 peak), C (1950 at 1.41 mm, R-26) and the
+    air value of D (1500 at 4.47 mm, doc 08 §5) are reproduced within 1.5 %:
+    those numbers came from the same physics and the model only sharpens them.
+    A's 1430 does NOT reproduce -- it came from a 1/L scaling of Q_air, which
+    over-estimates Q at low Re; the model gives 1297 (-9.3 %). The coordinator
+    accepted the model values for the whole family on 2026-07-12 (R-48), so the
+    numbers below are the *superseded* ones, kept as the audit trail of that
+    decision.
     """
     assert q_total_model(constants, 2.0e-3) == pytest.approx(2610.0, rel=1e-2)
     assert q_total_model(constants, 1.41e-3) == pytest.approx(1950.0, rel=1.5e-2)
     assert q_air(constants, 4.47e-3) == pytest.approx(1500.0, rel=1e-2)
-    # Documented model prediction for A's length (escalated divergence, -9 %):
+    assert q_total_model(constants, 4.47e-3) == pytest.approx(1472.0, rel=1e-3)
     assert q_total_model(constants, 5.0e-3) == pytest.approx(1297.0, rel=1e-2)
+    # The 1/L scaling that produced A's 1430 is the outlier, not the model:
+    assert q_total_model(constants, 5.0e-3) < 0.95 * 1430.0
 
 
 # --------------------------------------------------------------------------- #
@@ -226,7 +231,15 @@ def test_resolve_without_constants_fails_loudly(config_dir: Path) -> None:
         system.resolve(PresetStore(config_dir))
 
 
-def test_builtin_variants_keep_explicit_q(config_dir: Path) -> None:
-    """A-D keep their explicit numbers: the resolved contract is untouched."""
-    for name, expected in (("A", 1430.0), ("B", 2610.0), ("C", 1950.0), ("D", 1500.0)):
-        assert load_variant(name, config_dir=config_dir).q_total == expected
+def test_builtin_variants_use_the_q_model(config_dir: Path, constants: Constants) -> None:
+    """A-D take q_total from the Q(L) model in air (R-48/R-49).
+
+    The family runs in air (``vacuum: false`` everywhere, R-49); each variant
+    omits ``q_total`` so the model is the single source of truth. Values:
+    A 1297.35 (L = 5.0 mm), B 2606.49 (2.0 mm), C 1969.01 (1.41 mm),
+    D 1472.03 (4.47 mm) -- pinned in the resolved-variant golden.
+    """
+    for name, length in (("A", 5.0e-3), ("B", 2.0e-3), ("C", 1.41e-3), ("D", 4.47e-3)):
+        variant = load_variant(name, config_dir=config_dir)
+        assert variant.vacuum is False
+        assert variant.q_total == pytest.approx(q_total_model(constants, length), rel=1e-12)

@@ -84,4 +84,8 @@ def test_resonant_variant_has_line_frequency(config_dir: Path) -> None:
     d = load_variant("D", config_dir=config_dir)
     assert d.mode == "resonance"
     assert d.line_freq_hz == pytest.approx(5000.0)
-    assert d.vacuum is True
+    # Air is the baseline environment of the whole family (R-49); reduced
+    # pressure is out of scope (backlog M-13).
+    assert d.vacuum is False
+    # Q comes from the Q(L) model in air (R-48), not from a hand-set constant.
+    assert d.q_total == pytest.approx(1472.0, rel=1e-3)

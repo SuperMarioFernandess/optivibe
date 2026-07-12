@@ -292,7 +292,7 @@ class SystemBuilderPanel(QWidget):
         self._route = QComboBox()
         self._route.addItems(("2", "1"))
         self._eta_bias = _line("0.25")
-        self._q_total = _line("2610.0")
+        self._q_total = _line()  # empty = computed by the Q(L) model (R-48)
         self._target_nea = _line("10.0")
         self._vacuum = QCheckBox("vacuum")
         self._mode.currentTextChanged.connect(self._on_mode_changed)
@@ -356,7 +356,7 @@ class SystemBuilderPanel(QWidget):
         form.addRow("full scale [g]", self._full_scale)
         form.addRow("route", self._route)
         form.addRow("eta_bias (stub)", self._eta_bias)
-        form.addRow("Q total", self._q_total)
+        form.addRow("Q total (blank = Q(L) model)", self._q_total)
         form.addRow("target NEA [ug/rtHz]", self._target_nea)
         form.addRow(self._vacuum)
         return group
@@ -389,7 +389,7 @@ class SystemBuilderPanel(QWidget):
         self._full_scale.setText(_fmt(system.full_scale_g))
         self._route.setCurrentText(str(system.route))
         self._eta_bias.setText(_fmt(system.eta_bias))
-        self._q_total.setText(_fmt(system.q_total))
+        self._q_total.setText(_fmt(system.q_total) if system.q_total else "")
         self._target_nea.setText(
             _fmt(system.target_nea_ug_rthz) if system.target_nea_ug_rthz else ""
         )
@@ -471,7 +471,7 @@ class SystemBuilderPanel(QWidget):
             "full_scale_g": float(self._full_scale.text()),
             "route": int(self._route.currentText()),
             "eta_bias": float(self._eta_bias.text()),
-            "q_total": float(self._q_total.text()),
+            "q_total": self._opt_float(self._q_total),
             "target_nea_ug_rthz": self._opt_float(self._target_nea),
             "vacuum": self._vacuum.isChecked(),
             "source": self._source.ref_payload(),

@@ -24,6 +24,7 @@ from optivibe.core.config import (
     PresetStore,
     SubsystemRef,
     SystemConfig,
+    load_constants,
     load_system_file,
     load_variant,
     save_system_config,
@@ -67,7 +68,14 @@ def _mirror_presets(dst_config_dir: Path, src_config_dir: Path) -> None:
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("name", sorted(_GOLDEN))
 def test_resolved_variant_is_bit_identical_to_golden(name: str, config_dir: Path) -> None:
-    """Composed A/B/C/D resolve to the exact pre-refactor flat dump."""
+    """Composed A/B/C/D resolve to the committed golden dump (the contract).
+
+    The golden was regenerated once, on 2026-07-12, when the coordinator moved
+    the whole family onto the computable Q(L) damping model in air (R-48/R-49):
+    q_total A 1430 -> 1297.35, B 2610 -> 2606.49, C 1950 -> 1969.01,
+    D 1500 -> 1472.03, and D.vacuum true -> false. Everything else is byte-for-
+    byte the pre-refactor flat dump.
+    """
     resolved = load_variant(name, config_dir=config_dir).model_dump(mode="python")
     assert resolved == _GOLDEN[name]
 
@@ -149,17 +157,24 @@ def test_duplicate_name_same_tier_fails(tmp_path: Path, config_dir: Path) -> Non
 # Save / load round-trip.
 # --------------------------------------------------------------------------- #
 def test_save_load_roundtrip_preserves_resolution(tmp_path: Path, config_dir: Path) -> None:
-    """A composition saved and reloaded resolves to the same VariantConfig."""
+    """A composition saved and reloaded resolves to the same VariantConfig.
+
+    Variant A omits ``q_total`` (the Q(L) model supplies it, R-48), so the
+    constants travel into ``resolve`` -- the round-trip must preserve the
+    computed value too.
+    """
     original = load_system_file(config_dir / "variants" / "A.yaml")
     store = PresetStore(config_dir)
-    before = original.resolve(store).model_dump(mode="python")
+    constants = load_constants(config_dir / "constants.yaml")
+    before = original.resolve(store, constants=constants).model_dump(mode="python")
+    assert original.q_total is None  # the model, not a hand-set number
 
     out = save_system_config(original, tmp_path / "user" / "systems" / "mine.yaml")
     assert out.is_file()
     reloaded = load_system_file(out)
 
     assert reloaded == original  # SystemConfig itself round-trips
-    after = reloaded.resolve(store).model_dump(mode="python")
+    after = reloaded.resolve(store, constants=constants).model_dump(mode="python")
     assert after == before  # and so does the resolved variant
 
 

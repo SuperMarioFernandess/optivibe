@@ -29,6 +29,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from optivibe.core.config.loader import load_constants
 from optivibe.core.config.presets import PresetStore
 from optivibe.core.config.subsystems import (
     CantileverConfig,
@@ -110,10 +111,18 @@ def resolve_system_variant(system: SystemConfig, config_dir: Path) -> VariantCon
     Raises
     ------
     ValueError
-        If a preset is unknown, an override key is invalid, or the composed
-        geometry violates a per-shape guard.
+        If a preset is unknown, an override key is invalid, the composed
+        geometry violates a per-shape guard, or the route-2 wash-out criterion
+        fails (M-01).
+
+    Notes
+    -----
+    The constants are passed through so a composition that leaves ``Q total``
+    empty resolves it from the Q(L) damping model (R-48; the built-in A-D all
+    do).
     """
-    return system.resolve(PresetStore(config_dir))
+    constants = load_constants(config_dir / "constants.yaml") if system.q_total is None else None
+    return system.resolve(PresetStore(config_dir), constants=constants)
 
 
 def subsystem_defaults(store: PresetStore, subsystem: str, preset: str) -> dict[str, Any]:
