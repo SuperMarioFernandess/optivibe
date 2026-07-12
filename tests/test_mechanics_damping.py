@@ -12,7 +12,7 @@ import pytest
 from optivibe.core.config import load_constants, load_variant
 from optivibe.core.config.models import Constants
 from optivibe.core.config.presets import PresetStore
-from optivibe.core.config.subsystems import SystemConfig
+from optivibe.core.config.subsystems import SystemConfig, _quantize_q
 from optivibe.mechanics.damping import (
     damping_budget,
     hydrodynamic_function,
@@ -202,10 +202,58 @@ def test_invalid_inputs_raise(constants: Constants) -> None:
 # Config wiring: explicit q_total keeps priority; None computes Q(L) (M-02).
 # --------------------------------------------------------------------------- #
 def test_resolve_computes_q_when_omitted(config_dir: Path, constants: Constants) -> None:
-    """``q_total: null`` resolves to the damping-model value (M-02)."""
+    """``q_total: null`` resolves to the damping-model value (M-02).
+
+    The resolved number is quantized to 6 significant digits (R-51), so the
+    comparison is at that precision, not at machine epsilon.
+    """
     system = SystemConfig.model_validate(_base_system(2.0e-3))
     variant = system.resolve(PresetStore(config_dir), constants=constants)
-    assert variant.q_total == pytest.approx(q_total_model(constants, 2.0e-3), rel=1e-12)
+    assert variant.q_total == pytest.approx(q_total_model(constants, 2.0e-3), rel=1e-5)
+
+
+def test_resolved_q_is_quantized_to_six_significant_digits(
+    config_dir: Path, constants: Constants
+) -> None:
+    """The computed q_total carries exactly 6 significant digits (R-51).
+
+    The Q(L) model calls into libm (complex sqrt/division), whose last mantissa
+    bit is platform-dependent; the resolved variant is a byte-compared contract
+    (18 §5). Quantizing at resolve time makes that contract portable while
+    keeping ~1e-6 relative precision -- ten orders above the ULP noise and far
+    beyond the ~2 digits to which Q is physically known.
+    """
+    system = SystemConfig.model_validate(_base_system(2.0e-3))
+    resolved = system.resolve(PresetStore(config_dir), constants=constants).q_total
+    assert resolved is not None
+    assert resolved == float(f"{resolved:.6g}")  # idempotent: already quantized
+    assert resolved != q_total_model(constants, 2.0e-3)  # and strictly coarser
+
+
+def test_resolved_q_survives_ulp_jitter(config_dir: Path, constants: Constants) -> None:
+    """Quantization absorbs platform ULP jitter in the computed Q (R-51).
+
+    Regression guard for the CI failure of 2026-07-12: the byte-compared
+    resolved golden broke because libm returned a last-mantissa-bit difference
+    (e.g. 2606.4905102116145 vs ...15) on another machine. Perturbing each
+    variant's model value by +-50 ULP -- fifty times the observed jitter --
+    must not move the quantized number.
+    """
+    for name, length, vacuum in (
+        ("A", 5.0e-3, False),
+        ("B", 2.0e-3, False),
+        ("C", 1.41e-3, False),
+        ("D", 4.47e-3, False),
+        ("D_vacuum", 4.47e-3, True),
+    ):
+        exact = q_total_model(constants, length, vacuum=vacuum)
+        quantized = {_quantize_q(exact)}
+        for direction in (math.inf, -math.inf):
+            value = exact
+            for _ in range(50):
+                value = math.nextafter(value, direction)
+                quantized.add(_quantize_q(value))
+        assert quantized == {load_variant(name, config_dir=config_dir).q_total}, name
 
 
 def test_resolve_explicit_q_keeps_priority(config_dir: Path, constants: Constants) -> None:
@@ -219,9 +267,7 @@ def test_resolve_vacuum_flag_reaches_q_model(config_dir: Path, constants: Consta
     """``vacuum: true`` removes the air channel from the computed Q (M-02)."""
     system = SystemConfig.model_validate(_base_system(2.0e-3, vacuum=True))
     variant = system.resolve(PresetStore(config_dir), constants=constants)
-    assert variant.q_total == pytest.approx(
-        q_total_model(constants, 2.0e-3, vacuum=True), rel=1e-12
-    )
+    assert variant.q_total == pytest.approx(q_total_model(constants, 2.0e-3, vacuum=True), rel=1e-5)
 
 
 def test_resolve_without_constants_fails_loudly(config_dir: Path) -> None:
@@ -243,7 +289,7 @@ def test_vacuum_reference_variant_is_consistent(config_dir: Path, constants: Con
     air = load_variant("D", config_dir=config_dir)
     vac = load_variant("D_vacuum", config_dir=config_dir)
     assert vac.vacuum is True
-    assert vac.q_total == pytest.approx(q_total_model(constants, 4.47e-3, vacuum=True), rel=1e-12)
+    assert vac.q_total == pytest.approx(q_total_model(constants, 4.47e-3, vacuum=True), rel=1e-5)
     # FS ~ 1/Q (resonant gain |D(f1)| = Q), so FS * Q is invariant across the two.
     assert vac.full_scale_g * vac.q_total == pytest.approx(air.full_scale_g * air.q_total, rel=2e-2)
     # Thermal floor ~ 1/sqrt(Q) (doc 07 §2): the vacuum target is sqrt(Q) times lower.
@@ -264,4 +310,4 @@ def test_builtin_variants_use_the_q_model(config_dir: Path, constants: Constants
     for name, length in (("A", 5.0e-3), ("B", 2.0e-3), ("C", 1.41e-3), ("D", 4.47e-3)):
         variant = load_variant(name, config_dir=config_dir)
         assert variant.vacuum is False
-        assert variant.q_total == pytest.approx(q_total_model(constants, length), rel=1e-12)
+        assert variant.q_total == pytest.approx(q_total_model(constants, length), rel=1e-5)

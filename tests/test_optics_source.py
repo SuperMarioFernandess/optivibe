@@ -186,7 +186,8 @@ def test_resolve_derives_rin_from_linewidth(config_dir: Path) -> None:
     system = SystemConfig.model_validate(_base_system(source={"preset": "sld_dl60"}))
     variant = system.resolve(PresetStore(config_dir))
     expected = rin_ase_db_hz(linewidth_nu_hz(_LAMBDA, 60.0e-9))
-    assert variant.source.rin_db_hz == pytest.approx(expected, rel=1e-12)
+    # Quantized to 6 significant digits at resolve time (R-51).
+    assert variant.source.rin_db_hz == pytest.approx(expected, rel=1e-5)
     assert variant.source.rin_db_hz == pytest.approx(-125.73, abs=0.01)
 
 

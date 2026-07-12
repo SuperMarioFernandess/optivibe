@@ -30,7 +30,7 @@
       "mode_field_radius_m": 5.2e-06,
       "wedge_angle_rad": null
     },
-    "q_total": 1297.3509606250393,
+    "q_total": 1297.35,
     "reflector": {
       "radius_of_curvature_m": 6.25e-05,
       "reflectivity": 0.98,
@@ -78,7 +78,7 @@
       "mode_field_radius_m": 5.2e-06,
       "wedge_angle_rad": null
     },
-    "q_total": 2606.490510211615,
+    "q_total": 2606.49,
     "reflector": {
       "radius_of_curvature_m": 3.1e-05,
       "reflectivity": 0.98,
@@ -126,7 +126,7 @@
       "mode_field_radius_m": 5.2e-06,
       "wedge_angle_rad": null
     },
-    "q_total": 1969.0063637053959,
+    "q_total": 1969.01,
     "reflector": {
       "radius_of_curvature_m": 3.1e-05,
       "reflectivity": 0.98,
@@ -174,7 +174,7 @@
       "mode_field_radius_m": 5.2e-06,
       "wedge_angle_rad": null
     },
-    "q_total": 1472.028510834541,
+    "q_total": 1472.03,
     "reflector": {
       "radius_of_curvature_m": 3.1e-05,
       "reflectivity": 0.98,

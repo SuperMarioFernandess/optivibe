@@ -572,9 +572,9 @@ class SystemConfig(_SubsystemBase):
                     "automatically)"
                 )
                 raise ValueError(msg)
-            q_total = q_total_model(constants, can.length_m, vacuum=self.vacuum)
+            q_total = _quantize_q(q_total_model(constants, can.length_m, vacuum=self.vacuum))
             logger.info(
-                "composition %r: q_total computed from the Q(L) damping model: %.1f "
+                "composition %r: q_total computed from the Q(L) damping model: %.6g "
                 "(L = %.3g m, vacuum = %s; M-02)",
                 self.name,
                 q_total,
@@ -763,7 +763,10 @@ def _effective_rin_db_hz(source: SourceConfig) -> float:
 
     assert source.linewidth_fwhm_m is not None  # validator invariant
     delta_nu = linewidth_nu_hz(source.wavelength_m, source.linewidth_fwhm_m)
-    derived = rin_ase_db_hz(delta_nu)
+    # Quantized for the same reason as the computed Q (R-51): a derived number
+    # that lands in the byte-compared resolved contract must not carry
+    # platform-dependent mantissa bits (log10 is a libm call).
+    derived = _quantize_q(rin_ase_db_hz(delta_nu))
     logger.info(
         "source RIN derived from the linewidth: dlam = %.3g m -> dnu = %.3g Hz -> "
         "RIN = %.1f dB/Hz (ASE floor 2/dnu, doc 07 §1.2; M-01)",
@@ -825,3 +828,44 @@ def _check_source_coherence(
             "(doc 03 §f'; R-13)"
         )
         raise ValueError(msg)
+
+
+# Significant digits kept in a computed q_total (see :func:`_quantize_q`).
+_Q_SIGNIFICANT_DIGITS = 6
+
+
+def _quantize_q(q_total: float) -> float:
+    """Round a computed Q to 6 significant digits so the contract is portable.
+
+    Rationale (R-51). Since R-48 ``q_total`` is *computed* rather than read from
+    the config, and the resolved variant is a byte-compared contract (the
+    resolved-variant golden, 18 §5). The Q(L) model evaluates a complex-valued
+    hydrodynamic function, whose last mantissa bit depends on the platform's
+    libm: two correct machines legitimately return e.g. 2606.4905102116145 and
+    2606.490510211615 (a 1-ULP, ~1e-16 relative difference). A byte-identical
+    contract on a full-precision float is therefore not satisfiable, and
+    loosening the golden comparison to a tolerance would blind it to real
+    shifts.
+
+    Quantizing to 6 significant digits fixes both: the contract stays an exact
+    comparison, and the retained precision (~1e-6 relative) sits ten orders of
+    magnitude above the ULP noise, so every platform agrees. The dropped digits
+    carry no physics -- Q is known to ~2 digits at best (the anchor coefficient
+    is mounting-dependent, docs 02 §5 / 07) -- and the kept ones are exactly the
+    numbers the knowledge base quotes (1297.35, 2606.49, 1969.01, 1472.03).
+
+    An explicit ``q_total`` in a composition is NOT quantized: it is the user's
+    number and is passed through verbatim.
+
+    Parameters
+    ----------
+    q_total : float
+        Quality factor from the damping model.
+
+    Returns
+    -------
+    float
+        The same value rounded to :data:`_Q_SIGNIFICANT_DIGITS` significant
+        digits.
+    """
+    return float(f"{q_total:.{_Q_SIGNIFICANT_DIGITS}g}")
