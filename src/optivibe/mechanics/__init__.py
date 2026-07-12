@@ -7,7 +7,9 @@ state-space solver "modal_time", both built on
 registered under "stub" for regression. Selection: ``stages.mechanics`` in the
 scenario (SW-02); the quality factor comes from the variant preset
 (``q_total``, docs 07/08) and may be overridden per scenario via
-``mechanics.q_total``.
+``mechanics.q_total``. Since M-02 a composition may omit ``q_total`` to use
+the computable damping model Q(L) (:mod:`optivibe.mechanics.damping`: air +
+anchor + internal losses, docs 02 §5 / 07 §2.3).
 """
 
 from __future__ import annotations
@@ -22,6 +24,15 @@ from optivibe.mechanics.cantilever import (
     lateral_qs_compliance,
     second_mode_hz,
     tilt_coupling_per_m,
+)
+from optivibe.mechanics.damping import (
+    damping_budget,
+    hydrodynamic_function,
+    knudsen_number,
+    q_air,
+    q_anchor,
+    q_total_model,
+    reynolds_number,
 )
 from optivibe.mechanics.modal import ModalFrequencyMechanics, ModalTimeMechanics
 from optivibe.mechanics.stub import StubMechanics
@@ -39,9 +50,16 @@ __all__ = [
     "ModalTimeMechanics",
     "StubMechanics",
     "axial_qs_compliance",
+    "damping_budget",
     "first_mode_hz",
     "first_mode_shape",
+    "hydrodynamic_function",
+    "knudsen_number",
     "lateral_qs_compliance",
+    "q_air",
+    "q_anchor",
+    "q_total_model",
+    "reynolds_number",
     "second_mode_hz",
     "tilt_coupling_per_m",
 ]
