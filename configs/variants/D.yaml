@@ -20,11 +20,14 @@ eta_bias: 0.25
 # in parallel with anchor 99 232). Supersedes the tabulated 1500 (-1.9 %, the
 # air-limited number of doc 08 §5, which the model reproduces). R-48.
 q_total: null
-# FS: resonant gain is |D(f1)| = Q, so FS ~ 1/Q. Rederived with the model Q
-# (1472 instead of 1500): 22.0 mg -> 22.4 mg (R-50). The product FS * Q is
-# invariant by construction, so the resonant current swing (~9.5 mA) and hence
-# adc_full_scale below are unchanged.
-full_scale_g: 0.0224
+# FS from the linearity-at-resonance constraint of doc 08 §5 (the binding one;
+# strength gives 3.45 g, far looser): FS = 13021 / (Q L^4[mm]) g. With the model
+# Q = 1472.03 at L = 4.47 mm this is 22.16 mg (the doc quotes 22 mg -- its
+# 13021/(1500*399.2) = 21.7 mg rounded up). Recomputed, not rescaled: rescaling
+# the rounded 22 mg by 1500/1472 would give 22.4 mg, a 1 % fudge (R-50).
+# FS * Q = 13021/L^4 is Q-invariant by construction, so the resonant current
+# swing (~9.5 mA) and hence adc_full_scale below do NOT move.
+full_scale_g: 0.02216
 # Target NEA = the thermal floor in AIR at this Q (doc 07 §2:
 # NEA_th = sqrt(4 kB T omega1 / (Q M_a)), M_a = 0.58 rho S L): 0.227 ug/sqrt(Hz)
 # at Q = 1472 (was 0.224 at Q = 1500). The old "toward ng in vacuum" framing is

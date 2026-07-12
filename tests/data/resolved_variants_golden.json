@@ -163,7 +163,7 @@
     },
     "endface_reflectivity": 0.036,
     "eta_bias": 0.25,
-    "full_scale_g": 0.0224,
+    "full_scale_g": 0.02216,
     "length_m": 0.00447,
     "line_freq_hz": 5000.0,
     "mode": "resonance",

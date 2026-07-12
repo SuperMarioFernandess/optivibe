@@ -24,7 +24,7 @@
 #              | air (D, delivered) | ideal vacuum (this file)
 #   Q_total    | 1 472              | 75 713   (x51)
 #   |D(f1)|    | 1 472              | 75 713
-#   FS         | 22.4 mg            | 0.436 mg (FS ~ 1/Q)
+#   FS         | 22.16 mg           | 0.431 mg (FS ~ 1/Q)
 #   NEA_th     | 0.227 ug/rtHz      | 0.032 ug/rtHz  (~32 ng/rtHz -- the "ng"
 #              |                    |  of the retired doc 08 §6.3 framing)
 #   peak width | 3.40 Hz            | 0.066 Hz (f1/Q -- needs f1 stability
@@ -46,7 +46,7 @@ eta_bias: 0.25
 # Q: computed by the Q(L) model with the air channel removed -> 75 713
 # (anchor 99 232 || structural 3.3e5 || TED 1e7). See the warning above.
 q_total: null
-full_scale_g: 4.36e-4     # FS ~ 1/Q: 22.4 mg * 1472 / 75 713 = 0.436 mg
+full_scale_g: 4.31e-4     # FS = 13021 / (Q L^4[mm]) = 13021 / (75713 * 399.2) g
 target_nea_ug_rthz: 0.032  # thermal floor at Q = 75 713 (doc 07 §2)
 vacuum: true
 source:
