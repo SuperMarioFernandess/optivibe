@@ -31,7 +31,13 @@ Subsystem field             SI unit              Resolved ``VariantConfig`` targ
 ``SourceConfig.source_kind``  --                 ``source.kind`` (doc 08 §6)
 ``SourceConfig.wavelength_m`` m                  ``source.wavelength_m`` (doc 03 §1)
 ``SourceConfig.power_w``      W                  ``source.power_w`` (doc 07 §2)
-``SourceConfig.rin_db_hz``    dB/Hz              ``source.rin_db_hz`` (doc 07 §1.2)
+``SourceConfig.rin_db_hz``    dB/Hz              ``source.rin_db_hz`` (doc 07 §1.2;
+                                                 derived from the linewidth when
+                                                 omitted -- SLD only, M-01)
+``SourceConfig.linewidth_fwhm_m``  m             consumed at resolve time (M-01:
+                                                 derived RIN + route-2 wash-out
+                                                 check); not in the resolved
+                                                 contract (golden untouched)
 ``FiberConfig.mode_field_radius_m``  m           ``optics.mode_field_radius_m`` (03 §1)
 ``FiberConfig.fresnel_R1``    --                 ``endface_reflectivity`` (doc 04 §4)
 ``FiberConfig.clad_diameter_m``  m               informational (see note)
@@ -53,6 +59,16 @@ material and the cladding diameter from the **global** constants
 and are not consumed by the resolved ``VariantConfig``; wiring per-subsystem
 material/geometry into the mechanics constants path is a deferred loop (doc 14
 §8, S9-B). They are validated for positivity so a typo still fails loudly.
+
+Physics imports (M-01/M-02 note). The config layer stays import-light and does
+not import the optics/mechanics layers at module import time; the two
+composition-time derivations of M-01 (ASE RIN, wash-out check --
+:mod:`optivibe.optics.source`) and M-02 (Q(L) --
+:mod:`optivibe.mechanics.damping`) are *lazy* imports inside
+:meth:`SystemConfig.resolve` and its helpers, mirroring the existing lazy
+``VariantConfig`` import. Unlike the replicated spot-radius guard (too small to
+justify a dependency), these closed-form models are single-sourced in their
+physics modules and pinned by their own golden tests.
 """
 
 from __future__ import annotations
@@ -62,9 +78,13 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from optivibe.core.logging import get_logger
+
 if TYPE_CHECKING:  # avoid importing the heavy resolved model at runtime import time
-    from optivibe.core.config.models import VariantConfig
+    from optivibe.core.config.models import Constants, VariantConfig
     from optivibe.core.config.presets import PresetStore
+
+logger = get_logger(__name__)
 
 # Reflector shapes with a registered optics implementation (doc 03; S3/S9-B).
 # S9-B added the sphere/plane/wedge family behind the optics shape layer
@@ -99,7 +119,7 @@ class _SubsystemBase(BaseModel):
 # Subsystem building blocks (editable; one model per physical subsystem).
 # --------------------------------------------------------------------------- #
 class SourceConfig(_SubsystemBase):
-    """Optical source subsystem (doc 08 §6; R-13/R-15/R-30).
+    """Optical source subsystem (doc 08 §6; R-13/R-15/R-30; M-01).
 
     Attributes
     ----------
@@ -110,14 +130,70 @@ class SourceConfig(_SubsystemBase):
         Centre wavelength lambda, m (doc 03 §1; 1550 nm common platform R-40).
     power_w : float
         Optical power P delivered to the fiber, W (doc 07 §2; 16-100 mW range).
-    rin_db_hz : float
-        Relative intensity noise, dB/Hz (doc 07 §1.2).
+    rin_db_hz : float or None
+        Relative intensity noise, dB/Hz (doc 07 §1.2). Optional since M-01:
+        when omitted for an ``SLD`` it is *derived* from the linewidth as the
+        ASE beat-noise floor ``RIN = 2/dnu`` at resolve time (doc 07 §1.2;
+        :func:`optivibe.optics.source.rin_ase_db_hz`). An explicit value keeps
+        priority (backward compatibility; real SLDs sit 0-10 dB above the
+        floor). A ``DFB`` must state its RIN explicitly -- coherent-laser RIN
+        is not derivable from the linewidth (see the M-01 module note).
+    linewidth_fwhm_m : float or None
+        Spectral FWHM dlam of the source, m (doc 03 §f'; M-01). Drives the
+        derived RIN (SLD), the coherence length ``L_c = 0.44 lambda^2 / dlam``
+        and the route-2 wash-out check ``V(A) < 0.03`` performed at resolve
+        time. ``None`` (default) keeps the pre-M-01 behaviour: no wash-out
+        check, RIN must be explicit.
     """
 
     source_kind: Literal["SLD", "DFB"] = "SLD"
     wavelength_m: float = Field(gt=0.0, description="Source wavelength lambda, m (doc 03 §1)")
     power_w: float = Field(gt=0.0, description="Optical power P, W (doc 07 §2)")
-    rin_db_hz: float = Field(description="Relative intensity noise, dB/Hz (doc 07 §1.2)")
+    rin_db_hz: float | None = Field(
+        default=None,
+        description="Relative intensity noise, dB/Hz (doc 07 §1.2); derived from "
+        "linewidth_fwhm_m for SLD sources when omitted (M-01)",
+    )
+    linewidth_fwhm_m: float | None = Field(
+        default=None,
+        gt=0.0,
+        description="Spectral FWHM dlam, m (doc 03 §f'; M-01); enables the derived "
+        "ASE RIN and the route-2 wash-out check",
+    )
+
+    @model_validator(mode="after")
+    def _check_noise_inputs(self) -> SourceConfig:
+        """Guarantee a resolvable RIN and the validity of the M-01 derivations.
+
+        * some noise input must exist: an explicit ``rin_db_hz`` or (for SLD)
+          a ``linewidth_fwhm_m`` to derive it from;
+        * the ASE relation ``RIN = 2/dnu`` holds for thermal/ASE light only, so
+          a ``DFB`` without an explicit RIN is rejected (doc 07 §1.2; M-01);
+        * the first-order conversion ``dnu = c dlam / lambda^2`` needs
+          ``dlam << lambda`` (mirrors
+          :func:`optivibe.optics.source.linewidth_nu_hz`).
+        """
+        if self.rin_db_hz is None and self.linewidth_fwhm_m is None:
+            msg = (
+                "source needs a noise input: give rin_db_hz explicitly or (SLD only) "
+                "linewidth_fwhm_m to derive the ASE floor RIN = 2/dnu (doc 07 §1.2; M-01)"
+            )
+            raise ValueError(msg)
+        if self.rin_db_hz is None and self.source_kind != "SLD":
+            msg = (
+                "rin_db_hz is required for a DFB source: the ASE relation RIN = 2/dnu "
+                "holds for thermal/ASE light only, not for a coherent laser (doc 07 "
+                "§1.2; M-01)"
+            )
+            raise ValueError(msg)
+        if self.linewidth_fwhm_m is not None and self.linewidth_fwhm_m >= 0.2 * self.wavelength_m:
+            msg = (
+                f"linewidth_fwhm_m = {self.linewidth_fwhm_m:.3e} m is not small next to "
+                f"wavelength_m = {self.wavelength_m:.3e} m; the first-order conversion "
+                "dnu = c dlam / lambda^2 no longer applies (doc 07 §1.2)"
+            )
+            raise ValueError(msg)
+        return self
 
 
 class FiberMaterial(_SubsystemBase):
@@ -376,10 +452,15 @@ class SystemConfig(_SubsystemBase):
     eta_bias : float
         Optical working-point efficiency eta0 used by the *stub* optics (S0);
         the physical cylinder optics computes its own eta0 (doc 03 §5).
-    q_total : float
+    q_total : float or None
         Total mechanical quality factor Q of mode 1 at this variant's length.
         Variant-specific (depends on L, vacuum, mounting), so it lives here
-        rather than in the reusable cantilever preset (docs 07/08).
+        rather than in the reusable cantilever preset (docs 07/08). Since M-02
+        the field is optional: an explicit value keeps priority (backward
+        compatibility, O-SW-06), while ``None`` computes it from the damping
+        model ``Q(L)`` (air + anchor + internal losses,
+        :func:`optivibe.mechanics.damping.q_total_model`; ``vacuum`` removes
+        the air channel) at resolve time.
     target_nea_ug_rthz : float or None
         Target noise-equivalent acceleration, ug/sqrt(Hz) (placeholder, O-09).
     vacuum : bool
@@ -396,7 +477,11 @@ class SystemConfig(_SubsystemBase):
     full_scale_g: float = Field(gt=0.0, description="Full-scale acceleration FS, g")
     route: Literal[1, 2] = 2
     eta_bias: float = Field(gt=0.0, le=1.0, description="Optical bias eta0 (stub optics)")
-    q_total: float = Field(gt=0.0, description="Total quality factor Q of mode 1")
+    q_total: float | None = Field(
+        default=None,
+        gt=0.0,
+        description="Total quality factor Q of mode 1; None = computable Q(L) model (M-02)",
+    )
     target_nea_ug_rthz: float | None = Field(default=None, gt=0.0)
     vacuum: bool = False
 
@@ -419,7 +504,7 @@ class SystemConfig(_SubsystemBase):
     # ----------------------------------------------------------------- #
     # Resolution to the flat VariantConfig read by the stages.
     # ----------------------------------------------------------------- #
-    def resolve(self, store: PresetStore) -> VariantConfig:
+    def resolve(self, store: PresetStore, *, constants: Constants | None = None) -> VariantConfig:
         """Resolve presets + overrides into a flat :class:`VariantConfig`.
 
         The subsystem blocks are built (preset then overrides), the
@@ -427,10 +512,27 @@ class SystemConfig(_SubsystemBase):
         re-flattened into the exact field layout the stages read -- so the
         result is bit-identical to the equivalent S8 flat variant.
 
+        M-01/M-02 composition-time derivations (both opt-in, so pre-existing
+        compositions resolve unchanged):
+
+        * a missing ``source.rin_db_hz`` is derived from the SLD linewidth as
+          the ASE floor ``RIN = 2/dnu`` (doc 07 §1.2);
+        * when the linewidth is given and ``route == 2``, the coherent
+          wash-out criterion ``V(A) < 0.03`` (doc 03 §f'; R-13) is enforced at
+          the nominal gap -- a route-2 composition whose endface fringe is NOT
+          washed out is physically inconsistent with the intensity model
+          (R-14) and fails loudly (10 §7);
+        * a missing ``q_total`` is computed from the damping model ``Q(L)``
+          (docs 02 §5, 07 §2.3; M-02), honouring ``vacuum``.
+
         Parameters
         ----------
         store : PresetStore
             Resolver for ``{subsystem, preset_name} -> subsystem model``.
+        constants : Constants or None, optional
+            Physical constants (doc 01 mirror), required only when ``q_total``
+            is omitted (the Q(L) model needs the fiber/air constants). The
+            loader passes them automatically in that case.
 
         Returns
         -------
@@ -440,9 +542,10 @@ class SystemConfig(_SubsystemBase):
         Raises
         ------
         ValueError
-            If a preset is unknown, an override key is invalid, or the composed
+            If a preset is unknown, an override key is invalid, the composed
             geometry violates the paraxial guards (R_c >= 5 w0, w(A) <= R_c/3)
-            or names an unregistered reflector shape.
+            or names an unregistered reflector shape, the route-2 wash-out
+            criterion fails, or ``q_total`` is omitted without ``constants``.
         """
         from optivibe.core.config.models import VariantConfig
 
@@ -453,6 +556,31 @@ class SystemConfig(_SubsystemBase):
         det = store.build_detector(self.detector)
 
         _check_composition_geometry(src, fib, ref)
+        _check_source_coherence(src, ref, route=self.route)
+
+        rin_db_hz = _effective_rin_db_hz(src)
+        q_total = self.q_total
+        if q_total is None:
+            # Lazy physics import: the config layer stays import-light; the
+            # Q(L) derivation is a composition-time computation (M-02).
+            from optivibe.mechanics.damping import q_total_model
+
+            if constants is None:
+                msg = (
+                    "q_total omitted: the Q(L) damping model (M-02) needs the physical "
+                    "constants; pass constants= to resolve() (the loader does this "
+                    "automatically)"
+                )
+                raise ValueError(msg)
+            q_total = q_total_model(constants, can.length_m, vacuum=self.vacuum)
+            logger.info(
+                "composition %r: q_total computed from the Q(L) damping model: %.1f "
+                "(L = %.3g m, vacuum = %s; M-02)",
+                self.name,
+                q_total,
+                can.length_m,
+                self.vacuum,
+            )
 
         variant_dict: dict[str, Any] = {
             "name": self.name,
@@ -471,7 +599,7 @@ class SystemConfig(_SubsystemBase):
                 "kind": src.source_kind,
                 "wavelength_m": src.wavelength_m,
                 "power_w": src.power_w,
-                "rin_db_hz": src.rin_db_hz,
+                "rin_db_hz": rin_db_hz,
             },
             "route": self.route,
             "responsivity_a_w": det.responsivity,
@@ -495,7 +623,7 @@ class SystemConfig(_SubsystemBase):
                 "antialias": det.antialias,
                 "rin_shape": det.rin_shape,
             },
-            "q_total": self.q_total,
+            "q_total": q_total,
             "target_nea_ug_rthz": self.target_nea_ug_rthz,
             "vacuum": self.vacuum,
         }
@@ -602,3 +730,98 @@ def _check_composition_geometry(
             )
             raise ValueError(msg)
     # plane: R_c -> inf, only the gap guard (already enforced by gap_m > 0).
+
+
+# --------------------------------------------------------------------------- #
+# M-01 composition-time source derivations (docs 03 §f', 07 §1.2; R-13/R-14).
+# --------------------------------------------------------------------------- #
+def _effective_rin_db_hz(source: SourceConfig) -> float:
+    """Resolve the effective RIN: explicit value first, else the ASE floor (M-01).
+
+    An explicit ``rin_db_hz`` keeps priority (backward compatibility; a real
+    SLD sits 0-10 dB above the theoretical floor). When omitted, the
+    :class:`SourceConfig` validator has already guaranteed an SLD with a
+    linewidth, so the ASE beat-noise floor ``RIN = 2/dnu`` applies
+    (doc 07 §1.2; thermal/ASE statistics -- see
+    :mod:`optivibe.optics.source`).
+
+    Parameters
+    ----------
+    source : SourceConfig
+        Resolved source block.
+
+    Returns
+    -------
+    float
+        Effective relative intensity noise, dB/Hz.
+    """
+    if source.rin_db_hz is not None:
+        return source.rin_db_hz
+    # Lazy physics import: the config layer stays import-light (see the module
+    # note); the derivation is a composition-time computation (M-01).
+    from optivibe.optics.source import linewidth_nu_hz, rin_ase_db_hz
+
+    assert source.linewidth_fwhm_m is not None  # validator invariant
+    delta_nu = linewidth_nu_hz(source.wavelength_m, source.linewidth_fwhm_m)
+    derived = rin_ase_db_hz(delta_nu)
+    logger.info(
+        "source RIN derived from the linewidth: dlam = %.3g m -> dnu = %.3g Hz -> "
+        "RIN = %.1f dB/Hz (ASE floor 2/dnu, doc 07 §1.2; M-01)",
+        source.linewidth_fwhm_m,
+        delta_nu,
+        derived,
+    )
+    return derived
+
+
+def _check_source_coherence(
+    source: SourceConfig, reflector: ReflectorConfig, *, route: int
+) -> None:
+    """Route-2 wash-out guard: the endface fringe must be washed out (R-13).
+
+    Route 2 justifies the intensity signal model (R-14) by requiring the
+    endface fringe visibility ``V(A) = 2^{-(2A/L_c)^2} < 0.03`` at the working
+    gap (doc 03 §f'). When the composition states its linewidth (M-01), this
+    becomes checkable and is enforced at the *nominal* gap; the +-10 um
+    alignment tolerance of doc 03 §f' remains the designer's margin on top
+    (check the worst-case gap against
+    :func:`optivibe.optics.source.min_gap_for_washout_m`). Compositions
+    without a linewidth keep the pre-M-01 behaviour (no check) -- the wash-out
+    is then a stated assumption of route 2, not a verified one.
+
+    Parameters
+    ----------
+    source : SourceConfig
+        Resolved source block (wavelength, linewidth).
+    reflector : ReflectorConfig
+        Resolved reflector block (nominal gap A).
+    route : int
+        Endface treatment route of the composition (2 = coherent wash-out).
+
+    Raises
+    ------
+    ValueError
+        If the route-2 wash-out criterion ``V(A) < 0.03`` fails at the nominal
+        gap.
+    """
+    if route != 2 or source.linewidth_fwhm_m is None:
+        return
+    from optivibe.optics.source import (
+        WASHOUT_VISIBILITY_MAX,
+        coherence_length_m,
+        fringe_visibility,
+        min_gap_for_washout_m,
+    )
+
+    l_c = coherence_length_m(source.wavelength_m, source.linewidth_fwhm_m)
+    visibility = fringe_visibility(reflector.gap_m, l_c)
+    if visibility >= WASHOUT_VISIBILITY_MAX:
+        msg = (
+            f"route-2 wash-out criterion failed: V(A = {reflector.gap_m:.3e} m) = "
+            f"{visibility:.3f} >= {WASHOUT_VISIBILITY_MAX:g} for L_c = {l_c:.3e} m "
+            f"(dlam = {source.linewidth_fwhm_m:.3e} m); the endface fringe is not "
+            f"washed out and the intensity model (R-14) does not apply. Increase the "
+            f"gap to A >= {min_gap_for_washout_m(l_c):.3e} m or widen the source "
+            "(doc 03 §f'; R-13)"
+        )
+        raise ValueError(msg)

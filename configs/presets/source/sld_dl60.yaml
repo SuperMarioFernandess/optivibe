@@ -1,0 +1,11 @@
+# Built-in source preset: broadband SLD stated by its LINEWIDTH (M-01; doc 03
+# §f', doc 07 §1.2). dlam = 60 nm at 1550 nm is the route-2 design anchor
+# (wash-out over the whole A = 20-40 um alignment band, doc 03 §f' table).
+# rin_db_hz is deliberately omitted: it is DERIVED at resolve time as the ASE
+# beat-noise floor RIN = 2/dnu = -125.7 dB/Hz (thermal/ASE statistics; a real
+# SLD sits 0-10 dB above this floor -- override rin_db_hz once D-03 measures
+# it). Fields are SI except the named-unit rin_db_hz (dB/Hz).
+source_kind: SLD
+wavelength_m: 1550.0e-9     # lambda, common platform (doc 03 §1, R-40)
+power_w: 0.016              # 16 mW (doc 07 §2)
+linewidth_fwhm_m: 60.0e-9   # dlam FWHM (doc 03 §f'; L_c = 17.7 um, A_min = 19.9 um)

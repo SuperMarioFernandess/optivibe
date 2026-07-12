@@ -12,8 +12,11 @@ band:
 full_scale_g: 5.0
 route: 2
 eta_bias: 0.25
-# Q_total at L=5.0 mm: DERIVED via Q_air ~ 1/L (doc 07 §2.3); refined by the
-# computable Q(L) model (loop, doc 14 §8). Variant-specific -> stays here.
+# Q_total at L=5.0 mm: DERIVED via Q_air ~ 1/L (doc 07 §2.3). The computable
+# Q(L) model (M-02, mechanics.damping) now gives ~1297 (-9 %): the 1/L scaling
+# over-estimated Q_air at low Re. Changing this number is a resolved-contract
+# change (A-D golden) -> ESCALATED, kept as-is pending the coordinator's call
+# (O-SW-06 remainder). Omit the key (q_total: null) to use the model.
 q_total: 1430.0
 target_nea_ug_rthz: 1.0   # target ~1 ug/sqrt(Hz) (NEA ~0.1-0.5 achievable)
 vacuum: false

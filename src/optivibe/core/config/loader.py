@@ -173,7 +173,11 @@ def load_variant_file(path: Path, config_dir: Path | None = None) -> VariantConf
         return VariantConfig.model_validate(data)
     resolved_dir = _resolve_preset_root(path, config_dir)
     system = SystemConfig.model_validate(data)
-    return system.resolve(PresetStore(resolved_dir))
+    # The Q(L) damping model (M-02) needs the physical constants only when the
+    # composition omits q_total; load them lazily to keep the pre-M-02 path
+    # byte-identical (no extra IO for explicit-q compositions).
+    constants = load_constants(resolved_dir / "constants.yaml") if system.q_total is None else None
+    return system.resolve(PresetStore(resolved_dir), constants=constants)
 
 
 def _resolve_preset_root(variant_path: Path, config_dir: Path | None) -> Path:

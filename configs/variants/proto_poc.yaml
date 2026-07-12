@@ -16,7 +16,11 @@ band:
 full_scale_g: 50.0
 route: 2
 eta_bias: 0.25
-q_total: 2610.0           # PLACEHOLDER until D-01 fixes L (and 16 M-02 gives Q(L))
+q_total: 2610.0           # PLACEHOLDER until D-01 fixes L; the Q(L) model (M-02)
+                          # is now available (gives ~1661 at the placeholder
+                          # L = 4 mm) -- switch to q_total: null once D-01
+                          # measures L (kept explicit to avoid silently moving
+                          # the twin's numbers before characterization)
 target_nea_ug_rthz: null  # no NEA target: POC is characterized, not optimized
 vacuum: false
 source:

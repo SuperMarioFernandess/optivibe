@@ -13,7 +13,11 @@ band:
 full_scale_g: 0.022       # FS = 22 mg
 route: 1
 eta_bias: 0.25
-# Q_total at L=4.47 mm in air = 1500 -- doc 08 §5 (air-limited; FS derived with it).
+# Q_total at L=4.47 mm in air = 1500 -- doc 08 §5 (air-limited; FS derived with
+# it). The Q(L) model (M-02) reproduces it: Q_air(4.47 mm) = 1501; the full
+# air+anchor total is 1472 (-2 %). NOTE the value is the AIR number although
+# vacuum: true below -- under vacuum the model gives Q ~ 7.6e4 (anchor/internal
+# limited): a resolved-contract change -> ESCALATED (O-SW-06 remainder).
 q_total: 1500.0
 target_nea_ug_rthz: 0.22  # ~0.22 ug/sqrt(Hz), toward ng in vacuum
 vacuum: true
