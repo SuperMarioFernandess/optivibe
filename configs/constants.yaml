@@ -34,3 +34,13 @@ detector:
   elementary_charge_c: 1.602176634e-19  # e, C (shot noise 2 e I_DC; doc 07 §1.1)
   boltzmann_j_k: 1.380649e-23           # kB, J/K (Johnson 4 kB T / Rf; doc 07 §1.3)
   temperature_k: 293.0                  # T, K (doc 07 §2.5)
+
+# Damping-channel constants of the computable Q(L) model (docs 02 §5, 07 §2.3;
+# backlog M-02). Anchor loss Q_anchor = c (L/D)^3 is strongly mounting-dependent
+# (docs 02/07): this is the as-per-formula value. Mean free path enters only the
+# Knudsen continuum check (Kn = lambda_mfp / R ~ 1e-3 << 1 for the 125-um fiber).
+damping:
+  anchor_coefficient: 2.17     # c in Q_anchor = c (L/D)^3 (doc 02 §5; Hosaka 1995)
+  q_structural: 3.3e5          # structural Q of fused silica (doc 02 §5)
+  q_ted: 1.0e7                 # thermoelastic Q (doc 02 §5)
+  air_mean_free_path_m: 68.0e-9  # air at ~1 atm, 20 C (regime check, doc 07 §2.3)

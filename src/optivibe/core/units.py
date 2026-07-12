@@ -18,6 +18,10 @@ import numpy.typing as npt
 # Standard gravity, 1 g, in m/s^2 (knowledge base 01 §4.3).
 G0_M_S2: float = 9.80665
 
+# Speed of light in vacuum, m/s (exact SI-2019 value; doc 07 §1.2 uses it for
+# the linewidth conversion delta_nu = c * delta_lambda / lambda^2).
+SPEED_OF_LIGHT_M_S: float = 299792458.0
+
 # Scalar SI prefixes used at boundaries.
 _MM_PER_M = 1.0e3
 _UM_PER_M = 1.0e6

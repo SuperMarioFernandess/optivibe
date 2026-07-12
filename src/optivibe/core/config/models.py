@@ -87,6 +87,44 @@ class DetectorConstants(_Frozen):
     temperature_k: float = Field(default=293.0, gt=0.0, description="T, K (doc 07 §2.5)")
 
 
+class DampingConstants(_Frozen):
+    """Damping-channel constants of the computable Q(L) model (docs 02 §5, 07 §2.3).
+
+    Mirrors the fixed numbers of the mechanical damping budget: the clamped-end
+    (anchor) loss scaling ``Q_anchor = c_anchor (L/D)^3``, the structural and
+    thermoelastic quality factors, and the air mean free path used for the
+    continuum-regime (Knudsen) check. All values have ``Field`` defaults so a
+    ``constants.yaml`` without a ``damping`` block still validates (the
+    :class:`DetectorConstants` pattern). Backlog item M-02 (doc 16 §1).
+
+    Attributes
+    ----------
+    anchor_coefficient : float
+        Dimensionless coefficient of the support-loss scaling
+        ``Q_anchor = c (L/D)^3`` (doc 02 §5: ``c = 2.17``; Hosaka, Itao &
+        Kuroda, Sens. Actuators A 49, 87 (1995)). Strongly mounting-dependent
+        (docs 02/07) -- this is the as-per-formula value.
+    q_structural : float
+        Structural (material) quality factor of fused silica, ``~3.3e5``
+        (doc 02 §5; negligible next to air/anchor).
+    q_ted : float
+        Thermoelastic-damping quality factor, ``~1e7`` (doc 02 §5; negligible).
+    air_mean_free_path_m : float
+        Mean free path of air molecules at ~1 atm, 20 C, m (``~68 nm``). Used
+        only for the Knudsen-number continuum check ``Kn = lambda_mfp / R``
+        (doc 07 §2.3 regime note), not in the Q formulas themselves.
+    """
+
+    anchor_coefficient: float = Field(
+        default=2.17, gt=0.0, description="Anchor-loss coefficient c in Q_anchor = c (L/D)^3"
+    )
+    q_structural: float = Field(default=3.3e5, gt=0.0, description="Structural Q (doc 02 §5)")
+    q_ted: float = Field(default=1.0e7, gt=0.0, description="Thermoelastic Q (doc 02 §5)")
+    air_mean_free_path_m: float = Field(
+        default=68.0e-9, gt=0.0, description="Air mean free path at 1 atm, m (Knudsen check)"
+    )
+
+
 class Constants(_Frozen):
     """Top-level physical constants bundle (doc 01).
 
@@ -100,6 +138,9 @@ class Constants(_Frozen):
         Universal and cantilever geometric constants.
     detector : DetectorConstants
         Universal/environment constants for the detector noise budget (doc 07).
+    damping : DampingConstants
+        Damping-channel constants of the computable Q(L) model (docs 02/07;
+        M-02).
     tilt_displacement_coupling_per_l : float
         Dimensionless rigid coupling ``theta * L / delta = 1.377`` (doc 01 §0,
         04 §2); divide by ``L`` to obtain ``theta / delta`` in 1/m.
@@ -109,6 +150,7 @@ class Constants(_Frozen):
     air: AirConstants
     universal: UniversalConstants
     detector: DetectorConstants = DetectorConstants()
+    damping: DampingConstants = DampingConstants()
     tilt_displacement_coupling_per_l: float = Field(
         gt=0.0, description="theta * L / delta coupling (1.377), dimensionless"
     )
