@@ -40,6 +40,15 @@ from optivibe.optics.reflector import (
     ReflectorOptics,
     build_reflector_model,
 )
+from optivibe.optics.source import (
+    WASHOUT_VISIBILITY_MAX,
+    coherence_length_m,
+    fringe_visibility,
+    linewidth_nu_hz,
+    min_gap_for_washout_m,
+    rin_ase,
+    rin_ase_db_hz,
+)
 from optivibe.optics.sphere import SphereOpticsModel
 from optivibe.optics.stub import StubOptics
 from optivibe.optics.wedge import WedgeOpticsModel
@@ -61,6 +70,7 @@ OPTICS_REGISTRY.register("reflector")(ReflectorOptics)  # self-documenting alias
 __all__ = [
     "OPTICS_REGISTRY",
     "REFLECTOR_MODEL_REGISTRY",
+    "WASHOUT_VISIBILITY_MAX",
     "CylinderOptics",
     "CylinderOpticsModel",
     "GaussianBeam",
@@ -72,8 +82,14 @@ __all__ = [
     "StubOptics",
     "WedgeOpticsModel",
     "build_reflector_model",
+    "coherence_length_m",
     "eta_parallel_curved",
     "eta_parallel_flat",
+    "fringe_visibility",
+    "linewidth_nu_hz",
+    "min_gap_for_washout_m",
     "misalignment_factor",
+    "rin_ase",
+    "rin_ase_db_hz",
     "round_trip_q",
 ]
