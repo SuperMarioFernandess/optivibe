@@ -24,7 +24,21 @@ from optivibe.core.logging import get_logger
 logger = get_logger(__name__)
 
 _ENV_VAR = "OPTIVIBE_CONFIG_DIR"
-_VALID_VARIANTS = ("A", "B", "C", "D", "sphere_demo", "plane_demo", "wedge_demo", "proto_poc")
+# Loadable variant files. A-D are the delivered family (doc 08); the *_demo and
+# proto_poc entries are working configurations; D_vacuum is a REFERENCE-ONLY
+# counterpart of D kept for comparison and for backlog M-13 (R-49/R-50) -- it is
+# deliberately absent from the resolved-variant golden and from the GUI list.
+_VALID_VARIANTS = (
+    "A",
+    "B",
+    "C",
+    "D",
+    "D_vacuum",
+    "sphere_demo",
+    "plane_demo",
+    "wedge_demo",
+    "proto_poc",
+)
 
 # Keys that mark a YAML document as a composed SystemConfig rather than a flat
 # VariantConfig. A composition references subsystem presets (``preset`` key) and

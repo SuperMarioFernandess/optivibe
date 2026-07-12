@@ -231,6 +231,28 @@ def test_resolve_without_constants_fails_loudly(config_dir: Path) -> None:
         system.resolve(PresetStore(config_dir))
 
 
+def test_vacuum_reference_variant_is_consistent(config_dir: Path, constants: Constants) -> None:
+    """``D_vacuum`` keeps the vacuum numbers for comparison / M-13 (R-49/R-50).
+
+    Reference only (not in the resolved-variant golden, not in the GUI list).
+    Checks that its stored numbers still follow from the model: Q from the
+    air-free damping budget, FS ~ 1/Q relative to the air-based D, and the
+    target NEA at the thermal floor of that Q. If the model moves, this test
+    catches a stale reference instead of letting it rot.
+    """
+    air = load_variant("D", config_dir=config_dir)
+    vac = load_variant("D_vacuum", config_dir=config_dir)
+    assert vac.vacuum is True
+    assert vac.q_total == pytest.approx(q_total_model(constants, 4.47e-3, vacuum=True), rel=1e-12)
+    # FS ~ 1/Q (resonant gain |D(f1)| = Q), so FS * Q is invariant across the two.
+    assert vac.full_scale_g * vac.q_total == pytest.approx(air.full_scale_g * air.q_total, rel=2e-2)
+    # Thermal floor ~ 1/sqrt(Q) (doc 07 §2): the vacuum target is sqrt(Q) times lower.
+    assert vac.target_nea_ug_rthz is not None
+    assert air.target_nea_ug_rthz is not None
+    ratio = air.target_nea_ug_rthz / vac.target_nea_ug_rthz
+    assert ratio == pytest.approx(math.sqrt(vac.q_total / air.q_total), rel=2e-2)
+
+
 def test_builtin_variants_use_the_q_model(config_dir: Path, constants: Constants) -> None:
     """A-D take q_total from the Q(L) model in air (R-48/R-49).
 

@@ -163,7 +163,7 @@
     },
     "endface_reflectivity": 0.036,
     "eta_bias": 0.25,
-    "full_scale_g": 0.022,
+    "full_scale_g": 0.0224,
     "length_m": 0.00447,
     "line_freq_hz": 5000.0,
     "mode": "resonance",
@@ -188,7 +188,7 @@
       "rin_db_hz": -155.0,
       "wavelength_m": 1.55e-06
     },
-    "target_nea_ug_rthz": 0.22,
+    "target_nea_ug_rthz": 0.227,
     "vacuum": false
   }
 }

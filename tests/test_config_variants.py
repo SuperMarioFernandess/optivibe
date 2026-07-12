@@ -42,7 +42,9 @@ EXPECTED = {
     },
     "D": {
         "length_m": 4.47e-3,
-        "full_scale_g": 0.022,
+        # FS rederived with the model Q in air: 22.0 mg -> 22.4 mg (FS ~ 1/Q,
+        # Q 1500 -> 1472; R-50, doc 08 addendum).
+        "full_scale_g": 0.0224,
         "rc_m": 31.0e-6,
         "power_w": 0.100,
         "source_kind": "DFB",
@@ -89,3 +91,7 @@ def test_resonant_variant_has_line_frequency(config_dir: Path) -> None:
     assert d.vacuum is False
     # Q comes from the Q(L) model in air (R-48), not from a hand-set constant.
     assert d.q_total == pytest.approx(1472.0, rel=1e-3)
+    # FS and the target NEA were rederived with that Q (R-50): FS ~ 1/Q, the
+    # target sits at the thermal floor NEA_th ~ 1/sqrt(Q) in air (doc 07 §2).
+    assert d.full_scale_g == pytest.approx(0.0224, rel=1e-3)
+    assert d.target_nea_ug_rthz == pytest.approx(0.227, rel=1e-2)
