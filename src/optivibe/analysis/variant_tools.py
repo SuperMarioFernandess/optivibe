@@ -16,6 +16,7 @@ from optivibe.core.config.models import Constants, VariantConfig
 from optivibe.detector.photodiode import noise_psd
 from optivibe.dsp.calibration import target_sensitivity
 from optivibe.mechanics.cantilever import CantileverModel
+from optivibe.mechanics.thermal import nea_thermal
 from optivibe.optics.cylinder import CylinderOpticsModel
 
 __all__ = ["AnalyticPoint", "analytic_point", "with_overrides"]
@@ -93,9 +94,14 @@ class AnalyticPoint:
     i_dc_a : float
         DC photocurrent, A.
     nea_plateau : float
-        Plateau NEA density, (m/s^2)/sqrt(Hz).
+        Total plateau NEA density (current-referred branches ``(+)`` the
+        Brownian ``NEA_th``, doc 17 §2; M-12), (m/s^2)/sqrt(Hz).
     nea_plateau_ug : float
         Plateau NEA density in ug/sqrt(Hz) (the reporting unit of doc 07/08).
+    nea_thermal : float
+        Brownian floor ``NEA_th`` of the mode, (m/s^2)/sqrt(Hz) (doc 07 §2).
+    nea_thermal_ug : float
+        The same in ug/sqrt(Hz).
     nea_full_band : float
         Full-band NEA over the band, m/s^2 (RMS).
     bandwidth_hz : float
@@ -114,21 +120,37 @@ class AnalyticPoint:
     i_dc_a: float
     nea_plateau: float
     nea_plateau_ug: float
+    nea_thermal: float
+    nea_thermal_ug: float
     nea_full_band: float
     bandwidth_hz: float
     modulation_at_fs: float
     dynamic_range_db: float
 
 
-def analytic_point(variant: VariantConfig, constants: Constants | None = None) -> AnalyticPoint:
+def analytic_point(
+    variant: VariantConfig,
+    constants: Constants | None = None,
+    *,
+    include_thermal: bool = True,
+) -> AnalyticPoint:
     """Compute analytic sensitivity/NEA/modulation for one variant (S6 §B7).
+
+    The NEA plateau is the doc 17 §2 chain ``i_n/|s_target| (+) NEA_th``
+    (M-12); the dynamic range uses the total floor, keeping the doc 17 §1
+    identity ``DR = FS / NEA_full_band`` with the thermal branch included.
 
     Parameters
     ----------
     variant : VariantConfig
-        Sensor variant (possibly perturbed by :func:`with_overrides`).
+        Sensor variant (possibly perturbed by :func:`with_overrides`). Note
+        :func:`with_overrides` does not re-derive ``q_total`` when perturbing
+        ``length_m`` -- the thermal branch then uses the base variant's Q.
     constants : Constants or None, optional
         Physical constants (default loaded when ``None``).
+    include_thermal : bool, optional
+        Add the Brownian floor branch (default True; disable for the purely
+        current-referred pre-M-12 figure).
 
     Returns
     -------
@@ -153,11 +175,13 @@ def analytic_point(variant: VariantConfig, constants: Constants | None = None) -
     )
     bandwidth = variant.band.f_max_hz - variant.band.f_min_hz
     fs_signal = abs_s * variant.full_scale_g * G0  # |I_AC| at full scale, A
-    noise_full_band = math.sqrt(psd["total"] * bandwidth)
+    thermal = nea_thermal(consts, variant.length_m, variant.q_total) if include_thermal else 0.0
     if abs_s > 0.0:
-        nea_plateau = math.sqrt(psd["total"]) / abs_s
+        nea_plateau = math.hypot(math.sqrt(psd["total"]) / abs_s, thermal)
         modulation_at_fs = fs_signal / i_dc
-        dynamic_range_db = 20.0 * math.log10(fs_signal / noise_full_band)
+        dynamic_range_db = 20.0 * math.log10(
+            variant.full_scale_g * G0 / (nea_plateau * math.sqrt(bandwidth))
+        )
     else:
         # Degenerate working point exactly at the eta peak (slope = 0): the
         # sensitivity vanishes and the input-referred NEA diverges. Report inf so
@@ -175,6 +199,8 @@ def analytic_point(variant: VariantConfig, constants: Constants | None = None) -
         i_dc_a=i_dc,
         nea_plateau=nea_plateau,
         nea_plateau_ug=nea_plateau / G0 * 1.0e6,
+        nea_thermal=thermal,
+        nea_thermal_ug=thermal / G0 * 1.0e6,
         nea_full_band=nea_full_band,
         bandwidth_hz=bandwidth,
         modulation_at_fs=modulation_at_fs,

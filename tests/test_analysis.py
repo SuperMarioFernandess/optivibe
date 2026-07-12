@@ -11,6 +11,7 @@ head-less figures. Run sizes are kept small for speed.
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import numpy as np
@@ -141,6 +142,36 @@ def test_nea_budget_plateau_and_split(variant_b: VariantConfig, constants: Const
     assert parts["shot"] + parts["rin"] + parts["johnson"] == pytest.approx(
         parts["total"], rel=1e-9
     )
+
+
+@pytest.mark.golden
+def test_golden_nea_budget_four_branch_quadrature(
+    variant_b: VariantConfig, constants: Constants
+) -> None:
+    """The budget total is the RSS of shot/RIN/Johnson/thermal (doc 17 §2; M-12).
+
+    The current-referred branches come from the doc 07 §1 PSDs; the thermal
+    branch is the acceleration-domain ``NEA_th`` (doc 07 §2). Their quadrature
+    equals ``nea_plateau`` and the ``"total"`` contribution exactly; the
+    current-domain cross-check (``psd_rel_error``) is untouched by the branch.
+    """
+    art = _run(variant_b, 200.0, 0.01)
+    budget = nea_budget(art.forward.detector, variant_b, constants)
+    off = nea_budget(art.forward.detector, variant_b, constants, include_thermal=False)
+    assert budget is not None and off is not None
+    c = budget.contributions
+    assert set(c) >= {"shot", "rin", "johnson", "thermal", "total"}
+    rss = math.sqrt(c["shot"] ** 2 + c["rin"] ** 2 + c["johnson"] ** 2 + c["thermal"] ** 2)
+    assert c["total"] == pytest.approx(rss, rel=1e-9)
+    assert c["total"] == pytest.approx(budget.nea_plateau, rel=1e-12)
+    assert c["thermal"] == pytest.approx(budget.nea_thermal, rel=1e-12)
+    # Toggle: the branch off reproduces the purely current-referred plateau.
+    assert off.nea_thermal == 0.0
+    assert budget.nea_plateau == pytest.approx(
+        math.hypot(off.nea_plateau, budget.nea_thermal), rel=1e-12
+    )
+    # The current-domain analytic cross-check is independent of the branch.
+    assert budget.psd_rel_error == off.psd_rel_error
 
 
 def test_nea_budget_analytic_cross_check(variant_b: VariantConfig, constants: Constants) -> None:

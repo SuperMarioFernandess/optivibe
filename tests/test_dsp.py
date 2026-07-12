@@ -271,6 +271,57 @@ def test_nea_spectrum_matches_plateau(variant_b: VariantConfig, constants: Const
     assert np.allclose(nea, summary.nea_plateau, rtol=1e-3)
 
 
+@pytest.mark.golden
+def test_golden_nea_thermal_branch_quadrature(
+    variant_b: VariantConfig, constants: Constants
+) -> None:
+    """The thermal branch obeys the doc 17 §2 chain ``i_n/|s| (+) NEA_th`` (M-12).
+
+    The toggle ``include_thermal=False`` reproduces the purely current-referred
+    figure bit-exactly; with the branch on, the plateau is the exact RSS, the
+    spectrum satisfies the pointwise quadrature identity, and ``as_dict``
+    exposes both components (docs 07 §3.1, 16 M-12).
+    """
+    from optivibe.mechanics.thermal import nea_thermal
+
+    detector = _forward(_drive(200.0, 1.0), variant_b, "photodiode")
+    on = nea_from_detector(detector, variant_b, constants)
+    off = nea_from_detector(detector, variant_b, constants, include_thermal=False)
+    assert on is not None and off is not None
+    assert off.nea_thermal == 0.0
+    assert off.nea_plateau == off.nea_optical  # hypot(x, 0) == x
+    expected_floor = nea_thermal(constants, variant_b.length_m, variant_b.q_total)
+    assert on.nea_thermal == pytest.approx(expected_floor, rel=1e-12)
+    assert on.nea_plateau == pytest.approx(math.hypot(off.nea_plateau, on.nea_thermal), rel=1e-12)
+    payload = on.as_dict()
+    assert payload["nea_thermal_m_s2_rthz"] == on.nea_thermal
+    assert payload["nea_optical_m_s2_rthz"] == on.nea_optical
+    freq = np.array([10.0, 200.0, 5000.0])
+    spec_on = nea_spectrum(detector, variant_b, freq, constants)
+    spec_off = nea_spectrum(detector, variant_b, freq, constants, include_thermal=False)
+    np.testing.assert_allclose(spec_on, np.hypot(spec_off, on.nea_thermal), rtol=1e-12)
+
+
+@pytest.mark.golden
+def test_golden_nea_spectrum_settles_on_thermal_floor_at_resonance(
+    variant_b: VariantConfig, constants: Constants
+) -> None:
+    """Near ``f1`` the optical NEA dips by ``~1/Q`` and the total settles onto
+    ``NEA_th`` -- the thermal floor caps the resonant dip (doc 07 §2.4/§3.1)."""
+    from optivibe.mechanics.cantilever import first_mode_hz
+
+    detector = _forward(_drive(200.0, 1.0), variant_b, "photodiode")
+    f1 = np.array([first_mode_hz(constants, variant_b.length_m)])
+    at_res = nea_spectrum(detector, variant_b, f1, constants)
+    at_res_no_th = nea_spectrum(detector, variant_b, f1, constants, include_thermal=False)
+    summary = nea_from_detector(detector, variant_b, constants)
+    assert summary is not None
+    # Optical branch dips by ~1/Q (Q ~ 2600 for B) -- far below the thermal floor.
+    assert at_res_no_th[0] < 0.1 * summary.nea_thermal
+    # The total is pinned by the flat thermal floor (within 1 % here).
+    assert at_res[0] == pytest.approx(summary.nea_thermal, rel=1e-2)
+
+
 # --------------------------------------------------------------------------- #
 # End-to-end "true vs recovered" on the full forward chain.
 # --------------------------------------------------------------------------- #

@@ -3,7 +3,10 @@
 Refers the detector noise to the input as the noise-equivalent acceleration
 ``NEA(f) = sqrt(S_i(f)) / |s_target(f)|`` (doc 07 §1, 05 §7) and decomposes the
 plateau floor into the shot / RIN / Johnson contributions read from the detector
-metadata, with an independent analytic cross-check (the convention is propagated
+metadata plus the Brownian thermal floor ``NEA_th`` (the fourth branch of the
+doc 17 §2 chain, ``(+)NEA_th``; M-12) added in quadrature in the acceleration
+domain, with an independent analytic cross-check of the current-domain PSD
+(the convention is propagated
 from ``reference_arm``, never re-picked -- O-SW-08/SW-32). It also derives the
 **displacement noise floor**: double integration amplifies the low-frequency
 noise as ``PSD_x = PSD_a / omega^4`` (and ``PSD_v = PSD_a / omega^2``), so the
@@ -46,7 +49,12 @@ class NeaBudget:
         Noise bandwidth ``B`` used for the full-band figure, Hz.
     contributions : Mapping[str, float]
         Per-contribution plateau NEA density (keys ``"shot"``, ``"rin"``,
-        ``"johnson"``, ``"total"``), (m/s^2)/sqrt(Hz).
+        ``"johnson"``, ``"thermal"``, ``"total"``), (m/s^2)/sqrt(Hz). The
+        ``"total"`` is the RSS of all four branches (equals ``nea_plateau``);
+        the current-referred branches follow doc 07 §1, the ``"thermal"``
+        branch is the acceleration-domain ``NEA_th`` of doc 07 §2 (M-12).
+    nea_thermal : float
+        Brownian floor ``NEA_th``, (m/s^2)/sqrt(Hz) (0 when disabled).
     psd_components : Mapping[str, float]
         The current-noise PSD components from the metadata, A^2/Hz.
     psd_total_analytic : float
@@ -71,6 +79,7 @@ class NeaBudget:
     nea_full_band: float
     bandwidth_hz: float
     contributions: dict[str, float]
+    nea_thermal: float
     psd_components: dict[str, float]
     psd_total_analytic: float
     psd_rel_error: float
@@ -105,6 +114,7 @@ def nea_budget(
     constants: Constants | None = None,
     *,
     n_points: int = 256,
+    include_thermal: bool = True,
 ) -> NeaBudget | None:
     """Assemble the NEA budget from a photodiode detector output (task S6 §B6).
 
@@ -120,6 +130,8 @@ def nea_budget(
         Physical constants (default loaded when ``None``).
     n_points : int, optional
         Number of points in the band frequency grid (default 256).
+    include_thermal : bool, optional
+        Add the Brownian floor ``NEA_th`` branch (doc 17 §2, M-12). Default True.
 
     Returns
     -------
@@ -127,12 +139,12 @@ def nea_budget(
         The full budget, or ``None`` for a noiseless detector.
     """
     consts = load_constants() if constants is None else constants
-    summary = nea_from_detector(detector, variant, consts)
+    summary = nea_from_detector(detector, variant, consts, include_thermal=include_thermal)
     if summary is None:
         return None
     noise = detector.noise
     freq = _band_grid(variant, n_points)
-    nea_density = nea_spectrum(detector, variant, freq, consts)
+    nea_density = nea_spectrum(detector, variant, freq, consts, include_thermal=include_thermal)
 
     s_target = summary.s_target
     abs_s = abs(s_target)
@@ -143,6 +155,10 @@ def nea_budget(
         "total": float(noise["psd_total_a2_hz"]),  # type: ignore[arg-type]
     }
     contributions = {key: math.sqrt(value) / abs_s for key, value in psd_components.items()}
+    # The thermal branch is acceleration-domain (doc 07 §2): it joins the split
+    # directly, and the total becomes the RSS of all four (== nea_plateau).
+    contributions["thermal"] = summary.nea_thermal
+    contributions["total"] = summary.nea_plateau
 
     psd_total_analytic = analytic_noise_psd(detector, variant, consts)
     psd_rel_error = abs(psd_components["total"] - psd_total_analytic) / psd_total_analytic
@@ -154,6 +170,7 @@ def nea_budget(
         nea_full_band=summary.nea_full_band,
         bandwidth_hz=summary.bandwidth_hz,
         contributions=contributions,
+        nea_thermal=summary.nea_thermal,
         psd_components=psd_components,
         psd_total_analytic=psd_total_analytic,
         psd_rel_error=psd_rel_error,

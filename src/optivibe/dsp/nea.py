@@ -6,6 +6,21 @@ divides by the through sensitivity (doc 05 §7):
 
 ``NEA(f) = sqrt(S_i(f)) / |s_target(f)|``   [(m/s^2)/sqrt(Hz)].
 
+**Thermal branch (M-12, doc 17 §2 / 07 §3.1).** The Brownian floor of the
+cantilever mode, ``NEA_th = sqrt(4 kB T omega_1 / (Q M_a))``
+(:func:`optivibe.mechanics.thermal.nea_thermal`), is an *acceleration-domain*
+noise independent of the photocurrent chain, so it is added in quadrature to
+the current-referred branches: ``NEA = i_n/|s_target| (+) NEA_th`` (doc 07
+§3.1; ``(+)`` = RSS of independent equivalent accelerations). It is flat
+across the band (the resonant denominator cancels between the thermal motion
+and the signal transfer, doc 07 §2.4), so near ``f1``, where the optical NEA
+dips by ``~1/Q``, the total floor settles onto ``NEA_th``. The branch is on by
+default (``include_thermal=True``) and negligible for the shot/RIN-limited
+variants (B/C/prototype: < 0.2 %, doc 16 M-12) but essential for the
+thermally-limited A/D. :func:`nea_from_psd` (the *measured*-record path)
+intentionally does **not** add it: a real photocurrent record already carries
+the thermal motion physically -- adding the analytic branch would double-count.
+
 On the plateau ``s_target`` is the constant ``s_target^QS``; across the band the
 complex ``s_target(f) = s_target^QS D(f)`` is used, so a white current floor maps
 to a flat input NEA that dips by ``~1/Q`` toward ``f1``. The full-band figure is
@@ -28,10 +43,12 @@ import math
 import numpy as np
 import numpy.typing as npt
 
+from optivibe.core.config.loader import load_constants
 from optivibe.core.config.models import Constants, VariantConfig
 from optivibe.core.types import DetectorOutput, FloatArray, Spectrum
 from optivibe.detector.photodiode import noise_psd
 from optivibe.dsp.calibration import dynamic_sensitivity, target_sensitivity
+from optivibe.mechanics.thermal import nea_thermal as thermal_nea_floor
 
 __all__ = ["NeaResult", "analytic_noise_psd", "nea_from_detector", "nea_from_psd", "nea_spectrum"]
 
@@ -46,8 +63,15 @@ class NeaResult:
         detector metadata).
     s_target : float
         Signed plateau sensitivity used, A/(m/s^2).
+    nea_optical : float
+        Current-referred (shot + RIN + Johnson) plateau NEA density,
+        (m/s^2)/sqrt(Hz).
+    nea_thermal : float
+        Brownian floor ``NEA_th`` of the mode, (m/s^2)/sqrt(Hz) (doc 07 §2;
+        0 when the branch is disabled).
     nea_plateau : float
-        Plateau noise-equivalent acceleration density, (m/s^2)/sqrt(Hz).
+        Total plateau NEA density ``nea_optical (+) nea_thermal`` (RSS),
+        (m/s^2)/sqrt(Hz).
     bandwidth_hz : float
         Noise bandwidth ``B`` used for the full-band figure, Hz.
     nea_full_band : float
@@ -63,18 +87,23 @@ class NeaResult:
         s_target: float,
         bandwidth_hz: float,
         reference_arm: str,
+        nea_thermal: float = 0.0,
     ) -> None:
         self.plateau_psd_a2_hz = plateau_psd_a2_hz
         self.s_target = s_target
         self.bandwidth_hz = bandwidth_hz
         self.reference_arm = reference_arm
-        self.nea_plateau = math.sqrt(plateau_psd_a2_hz) / abs(s_target)
+        self.nea_optical = math.sqrt(plateau_psd_a2_hz) / abs(s_target)
+        self.nea_thermal = nea_thermal
+        self.nea_plateau = math.hypot(self.nea_optical, nea_thermal)
         self.nea_full_band = self.nea_plateau * math.sqrt(bandwidth_hz)
 
     def as_dict(self) -> dict[str, object]:
         """Return the NEA summary as a plain mapping (for VibrationResult/metadata)."""
         return {
             "nea_plateau_m_s2_rthz": self.nea_plateau,
+            "nea_optical_m_s2_rthz": self.nea_optical,
+            "nea_thermal_m_s2_rthz": self.nea_thermal,
             "nea_full_band_m_s2": self.nea_full_band,
             "bandwidth_hz": self.bandwidth_hz,
             "s_target_a_per_m_s2": self.s_target,
@@ -89,6 +118,7 @@ def nea_from_detector(
     constants: Constants | None = None,
     *,
     bandwidth_hz: float | None = None,
+    include_thermal: bool = True,
 ) -> NeaResult | None:
     """NEA referred to the input from the detector noise metadata (S5 §5).
 
@@ -106,6 +136,10 @@ def nea_from_detector(
     bandwidth_hz : float or None, optional
         Noise bandwidth for the full-band figure; defaults to the detector's
         Nyquist bandwidth (``noise["nyquist_bw_hz"]`` or ``fs/2``).
+    include_thermal : bool, optional
+        Add the Brownian floor ``NEA_th`` in quadrature (the doc 17 §2 chain
+        ``(+)NEA_th``; M-12). On by default; disable to reproduce the purely
+        current-referred (pre-M-12) figure.
 
     Returns
     -------
@@ -115,16 +149,21 @@ def nea_from_detector(
     noise = detector.noise
     if noise.get("model") != "photodiode":
         return None
+    consts = load_constants() if constants is None else constants
     psd_total = float(noise["psd_total_a2_hz"])  # type: ignore[arg-type]
-    s_target = target_sensitivity(variant, constants)
+    s_target = target_sensitivity(variant, consts)
     if bandwidth_hz is None:
         bandwidth_hz = float(noise.get("nyquist_bw_hz", detector.fs / 2.0))  # type: ignore[arg-type]
     reference_arm = str(noise.get("reference_arm", "matched"))
+    thermal = (
+        thermal_nea_floor(consts, variant.length_m, variant.q_total) if include_thermal else 0.0
+    )
     return NeaResult(
         plateau_psd_a2_hz=psd_total,
         s_target=s_target,
         bandwidth_hz=bandwidth_hz,
         reference_arm=reference_arm,
+        nea_thermal=thermal,
     )
 
 
@@ -133,11 +172,16 @@ def nea_spectrum(
     variant: VariantConfig,
     freq_hz: FloatArray,
     constants: Constants | None = None,
+    *,
+    include_thermal: bool = True,
 ) -> FloatArray:
-    """NEA density across frequency ``sqrt(S_i)/|s_target(f)|`` (S5 §5; doc 05 §7).
+    """NEA density ``sqrt(S_i)/|s_target(f)| (+) NEA_th`` (S5 §5; docs 05 §7, 07 §3.1).
 
     Uses the white current PSD from the metadata and the complex
-    ``s_target(f) = s_target^QS D(f)`` so the curve dips toward ``f1``.
+    ``s_target(f) = s_target^QS D(f)`` so the optical branch dips toward
+    ``f1``; the flat Brownian floor ``NEA_th`` (doc 07 §2, M-12) is added in
+    quadrature, so near the resonance the total settles onto the thermal
+    floor instead of the ``~1/Q`` optical dip.
 
     Parameters
     ----------
@@ -150,6 +194,8 @@ def nea_spectrum(
         Frequencies, Hz.
     constants : Constants or None, optional
         Physical constants (default loaded when ``None``).
+    include_thermal : bool, optional
+        Add the flat ``NEA_th`` in quadrature (doc 17 §2; M-12). Default True.
 
     Returns
     -------
@@ -165,9 +211,14 @@ def nea_spectrum(
     if noise.get("model") != "photodiode":
         msg = "nea_spectrum requires a photodiode detector with a noise PSD"
         raise ValueError(msg)
+    consts = load_constants() if constants is None else constants
     psd_total = float(noise["psd_total_a2_hz"])  # type: ignore[arg-type]
-    s_f = dynamic_sensitivity(variant, freq_hz, constants)
-    out: FloatArray = math.sqrt(psd_total) / np.abs(s_f)
+    s_f = dynamic_sensitivity(variant, freq_hz, consts)
+    optical: FloatArray = math.sqrt(psd_total) / np.abs(s_f)
+    if not include_thermal:
+        return np.ascontiguousarray(optical, dtype=np.float64)
+    thermal = thermal_nea_floor(consts, variant.length_m, variant.q_total)
+    out: FloatArray = np.hypot(optical, thermal)
     return np.ascontiguousarray(out, dtype=np.float64)
 
 

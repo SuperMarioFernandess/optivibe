@@ -90,9 +90,9 @@ def plot_nea_budget(budget: NeaBudget) -> Figure:
     ax_f.set_title("noise-equivalent acceleration")
     ax_f.grid(True, which="both", alpha=0.3)
     ax_f.legend(fontsize=8)
-    contribs = ["shot", "rin", "johnson"]
-    values = [budget.contributions[c] / G0 * 1.0e6 for c in contribs]
-    ax_bar.bar(contribs, values, color=["tab:blue", "tab:orange", "tab:green"])
+    contribs = ["shot", "rin", "johnson", "thermal"]
+    values = [budget.contributions.get(c, 0.0) / G0 * 1.0e6 for c in contribs]
+    ax_bar.bar(contribs, values, color=["tab:blue", "tab:orange", "tab:green", "tab:red"])
     ax_bar.axhline(
         budget.contributions["total"] / G0 * 1.0e6, ls="--", color="black", label="total"
     )

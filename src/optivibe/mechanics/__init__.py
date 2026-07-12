@@ -9,7 +9,10 @@ scenario (SW-02); the quality factor comes from the variant preset
 (``q_total``, docs 07/08) and may be overridden per scenario via
 ``mechanics.q_total``. Since M-02 a composition may omit ``q_total`` to use
 the computable damping model Q(L) (:mod:`optivibe.mechanics.damping`: air +
-anchor + internal losses, docs 02 §5 / 07 §2.3).
+anchor + internal losses, docs 02 §5 / 07 §2.3). Since M-12 the mechanics also
+exposes the Brownian thermal floor of the mode (:mod:`optivibe.mechanics.thermal`:
+``NEA_th = sqrt(4 kB T omega_1 / (Q M_a))``, ``M_a ~ 0.58 rho S L``, doc 07 §2),
+consumed by the NEA budget as the fourth branch (doc 17 §2, ``(+)NEA_th``).
 """
 
 from __future__ import annotations
@@ -36,6 +39,12 @@ from optivibe.mechanics.damping import (
 )
 from optivibe.mechanics.modal import ModalFrequencyMechanics, ModalTimeMechanics
 from optivibe.mechanics.stub import StubMechanics
+from optivibe.mechanics.thermal import (
+    acceleration_effective_mass,
+    kinetic_effective_mass,
+    nea_thermal,
+    thermal_force_psd,
+)
 
 MECHANICS_REGISTRY: Registry[MechanicsStage] = Registry("mechanics")
 
@@ -49,17 +58,21 @@ __all__ = [
     "ModalFrequencyMechanics",
     "ModalTimeMechanics",
     "StubMechanics",
+    "acceleration_effective_mass",
     "axial_qs_compliance",
     "damping_budget",
     "first_mode_hz",
     "first_mode_shape",
     "hydrodynamic_function",
+    "kinetic_effective_mass",
     "knudsen_number",
     "lateral_qs_compliance",
+    "nea_thermal",
     "q_air",
     "q_anchor",
     "q_total_model",
     "reynolds_number",
     "second_mode_hz",
+    "thermal_force_psd",
     "tilt_coupling_per_m",
 ]
