@@ -38,6 +38,14 @@ Subsystem field             SI unit              Resolved ``VariantConfig`` targ
                                                  derived RIN + route-2 wash-out
                                                  check); not in the resolved
                                                  contract (golden untouched)
+``SourceConfig.lineshape``    --                 consumed at resolve time (M-10:
+                                                 shape-specific RIN form factor
+                                                 + wash-out law); not in the
+                                                 resolved contract
+``SourceConfig.spectrum_*``   m / arb.           consumed at resolve time (M-10,
+                                                 lineshape='measured': RIN =
+                                                 2 tau_c + numeric wash-out);
+                                                 not in the resolved contract
 ``FiberConfig.mode_field_radius_m``  m           ``optics.mode_field_radius_m`` (03 §1)
 ``FiberConfig.fresnel_R1``    --                 ``endface_reflectivity`` (doc 04 §4)
 ``FiberConfig.clad_diameter_m``  m               informational (see note)
@@ -144,6 +152,21 @@ class SourceConfig(_SubsystemBase):
         and the route-2 wash-out check ``V(A) < 0.03`` performed at resolve
         time. ``None`` (default) keeps the pre-M-01 behaviour: no wash-out
         check, RIN must be explicit.
+    lineshape : {"gaussian", "lorentzian", "measured"} or None
+        Shape of the source spectrum (M-10). ``None`` (default) keeps the
+        R-46 effective-scalar behaviour bit-identically: Gaussian visibility
+        law + rectangular-equivalent RIN floor ``2/dnu``. An explicit
+        ``"gaussian"``/``"lorentzian"`` derives *both* the visibility law and
+        the RIN form factor from that shape (Wiener-Khinchin / Siegert;
+        Lorentzian tails tighten the wash-out to ``A >= 1.2647 L_c``).
+        ``"measured"`` evaluates the tabulated spectrum numerically -- the
+        D-03/E1-P6 bridge.
+    spectrum_wavelength_m, spectrum_psd : list of float or None
+        Tabulated source spectrum (``lineshape = "measured"`` only): strictly
+        increasing wavelengths, m, and the spectral density at them
+        (arbitrary scale, e.g. an OSA trace). Consumed at resolve time
+        (derived RIN ``= 2 tau_c`` + numeric wash-out check); not part of the
+        resolved contract.
     """
 
     source_kind: Literal["SLD", "DFB"] = "SLD"
@@ -160,6 +183,21 @@ class SourceConfig(_SubsystemBase):
         description="Spectral FWHM dlam, m (doc 03 §f'; M-01); enables the derived "
         "ASE RIN and the route-2 wash-out check",
     )
+    lineshape: Literal["gaussian", "lorentzian", "measured"] | None = Field(
+        default=None,
+        description="Source spectrum shape (M-10); None keeps the R-46 effective-"
+        "scalar behaviour (Gaussian visibility, rectangular RIN floor 2/dnu)",
+    )
+    spectrum_wavelength_m: list[float] | None = Field(
+        default=None,
+        description="Measured-spectrum wavelength grid, m, strictly increasing "
+        "(lineshape='measured' only; M-10)",
+    )
+    spectrum_psd: list[float] | None = Field(
+        default=None,
+        description="Measured-spectrum density samples, arbitrary scale "
+        "(lineshape='measured' only; M-10)",
+    )
 
     @model_validator(mode="after")
     def _check_noise_inputs(self) -> SourceConfig:
@@ -173,10 +211,14 @@ class SourceConfig(_SubsystemBase):
           ``dlam << lambda`` (mirrors
           :func:`optivibe.optics.source.linewidth_nu_hz`).
         """
-        if self.rin_db_hz is None and self.linewidth_fwhm_m is None:
+        has_spectral_input = (
+            self.linewidth_fwhm_m is not None or self.spectrum_wavelength_m is not None
+        )
+        if self.rin_db_hz is None and not has_spectral_input:
             msg = (
                 "source needs a noise input: give rin_db_hz explicitly or (SLD only) "
-                "linewidth_fwhm_m to derive the ASE floor RIN = 2/dnu (doc 07 §1.2; M-01)"
+                "linewidth_fwhm_m -- or a measured spectrum (M-10) -- to derive the "
+                "ASE floor RIN = 2 tau_c (doc 07 §1.2; M-01)"
             )
             raise ValueError(msg)
         if self.rin_db_hz is None and self.source_kind != "SLD":
@@ -193,7 +235,58 @@ class SourceConfig(_SubsystemBase):
                 "dnu = c dlam / lambda^2 no longer applies (doc 07 §1.2)"
             )
             raise ValueError(msg)
+        self._check_lineshape_inputs()
         return self
+
+    def _check_lineshape_inputs(self) -> None:
+        """Enforce the M-10 lineshape/input pairing rules.
+
+        * an analytic ``lineshape`` (gaussian/lorentzian) shapes the linewidth,
+          so it requires ``linewidth_fwhm_m``;
+        * ``lineshape = "measured"`` requires the tabulated spectrum and rejects
+          ``linewidth_fwhm_m`` (single source of truth: the table);
+        * spectrum tables are meaningless without ``lineshape = "measured"``;
+        * the table must be well-formed (validated by the physics helper) and
+          must bracket ``wavelength_m`` -- a cheap catch of nm-vs-m unit slips.
+        """
+        if self.lineshape in ("gaussian", "lorentzian") and self.linewidth_fwhm_m is None:
+            msg = (
+                f"lineshape = {self.lineshape!r} shapes the linewidth and therefore "
+                "requires linewidth_fwhm_m (M-10)"
+            )
+            raise ValueError(msg)
+        has_table = self.spectrum_wavelength_m is not None or self.spectrum_psd is not None
+        if self.lineshape != "measured" and has_table:
+            msg = (
+                "spectrum_wavelength_m/spectrum_psd are read only with "
+                "lineshape = 'measured' (M-10); drop the table or set the lineshape"
+            )
+            raise ValueError(msg)
+        if self.lineshape == "measured":
+            if self.spectrum_wavelength_m is None or self.spectrum_psd is None:
+                msg = (
+                    "lineshape = 'measured' requires both spectrum_wavelength_m and "
+                    "spectrum_psd (M-10)"
+                )
+                raise ValueError(msg)
+            if self.linewidth_fwhm_m is not None:
+                msg = (
+                    "lineshape = 'measured' takes the spectrum table as the single "
+                    "source of truth; drop linewidth_fwhm_m (M-10)"
+                )
+                raise ValueError(msg)
+            from optivibe.optics.source import _normalized_spectrum_nu
+
+            # Validates monotonicity/positivity/power; raises ValueError itself.
+            _normalized_spectrum_nu(self.spectrum_wavelength_m, self.spectrum_psd)
+            lam_lo, lam_hi = self.spectrum_wavelength_m[0], self.spectrum_wavelength_m[-1]
+            if not lam_lo <= self.wavelength_m <= lam_hi:
+                msg = (
+                    f"wavelength_m = {self.wavelength_m:.3e} m lies outside the measured "
+                    f"spectrum span [{lam_lo:.3e}, {lam_hi:.3e}] m -- check the units of "
+                    "the table (OSA exports are often in nm; M-10)"
+                )
+                raise ValueError(msg)
 
 
 class FiberMaterial(_SubsystemBase):
@@ -758,21 +851,42 @@ def _effective_rin_db_hz(source: SourceConfig) -> float:
     if source.rin_db_hz is not None:
         return source.rin_db_hz
     # Lazy physics import: the config layer stays import-light (see the module
-    # note); the derivation is a composition-time computation (M-01).
+    # note); the derivation is a composition-time computation (M-01/M-10).
+    if source.lineshape == "measured":
+        from optivibe.optics.source import rin_ase_measured_db_hz
+
+        assert source.spectrum_wavelength_m is not None  # validator invariant
+        assert source.spectrum_psd is not None  # validator invariant
+        # Quantized for the same reason as the computed Q (R-51): a derived
+        # number that lands in the byte-compared resolved contract must not
+        # carry platform-dependent mantissa bits (libm + quadrature order).
+        derived = _quantize_q(
+            rin_ase_measured_db_hz(source.spectrum_wavelength_m, source.spectrum_psd)
+        )
+        logger.info(
+            "source RIN derived from the measured spectrum: RIN = %.1f dB/Hz "
+            "(ASE floor 2 tau_c, doc 07 §1.2; M-10)",
+            derived,
+        )
+        return derived
     from optivibe.optics.source import linewidth_nu_hz, rin_ase_db_hz
 
     assert source.linewidth_fwhm_m is not None  # validator invariant
     delta_nu = linewidth_nu_hz(source.wavelength_m, source.linewidth_fwhm_m)
+    # lineshape = None keeps the R-46 rectangular-equivalent floor 2/dnu
+    # bit-identically; an explicit analytic shape opts into its derived form
+    # factor (Gaussian -1.78 dB, Lorentzian -4.97 dB; doc 07 §1.2; M-10).
     # Quantized for the same reason as the computed Q (R-51): a derived number
     # that lands in the byte-compared resolved contract must not carry
     # platform-dependent mantissa bits (log10 is a libm call).
-    derived = _quantize_q(rin_ase_db_hz(delta_nu))
+    derived = _quantize_q(rin_ase_db_hz(delta_nu, lineshape=source.lineshape))
     logger.info(
         "source RIN derived from the linewidth: dlam = %.3g m -> dnu = %.3g Hz -> "
-        "RIN = %.1f dB/Hz (ASE floor 2/dnu, doc 07 §1.2; M-01)",
+        "RIN = %.1f dB/Hz (ASE floor, lineshape = %s, doc 07 §1.2; M-01/M-10)",
         source.linewidth_fwhm_m,
         delta_nu,
         derived,
+        source.lineshape or "rectangular-equivalent (R-46 default)",
     )
     return derived
 
@@ -807,25 +921,58 @@ def _check_source_coherence(
         If the route-2 wash-out criterion ``V(A) < 0.03`` fails at the nominal
         gap.
     """
-    if route != 2 or source.linewidth_fwhm_m is None:
+    if route != 2:
         return
     from optivibe.optics.source import (
         WASHOUT_VISIBILITY_MAX,
         coherence_length_m,
         fringe_visibility,
+        fringe_visibility_lorentzian,
+        fringe_visibility_measured,
+        min_gap_for_washout_lorentzian_m,
         min_gap_for_washout_m,
     )
 
+    if source.lineshape == "measured":
+        assert source.spectrum_wavelength_m is not None  # validator invariant
+        assert source.spectrum_psd is not None  # validator invariant
+        visibility = fringe_visibility_measured(
+            reflector.gap_m, source.spectrum_wavelength_m, source.spectrum_psd
+        )
+        if visibility >= WASHOUT_VISIBILITY_MAX:
+            msg = (
+                f"route-2 wash-out criterion failed: measured-spectrum "
+                f"V(A = {reflector.gap_m:.3e} m) = {visibility:.3f} >= "
+                f"{WASHOUT_VISIBILITY_MAX:g}; the endface fringe is not washed out and "
+                "the intensity model (R-14) does not apply. Widen the source or scan "
+                "V(A) over the alignment band (fringe_visibility_measured) -- "
+                "structured spectra can show coherence revivals (doc 03 §f'; "
+                "R-13; M-10 / E1-P6)"
+            )
+            raise ValueError(msg)
+        return
+    if source.linewidth_fwhm_m is None:
+        # Pre-M-01 behaviour: no linewidth stated -> the wash-out stays an
+        # assumption of route 2, not a verified property.
+        return
     l_c = coherence_length_m(source.wavelength_m, source.linewidth_fwhm_m)
-    visibility = fringe_visibility(reflector.gap_m, l_c)
+    if source.lineshape == "lorentzian":
+        # Heavy tails: V = 2^{-4A/L_c}, wash-out at A >= 1.2647 L_c (M-10).
+        visibility = fringe_visibility_lorentzian(reflector.gap_m, l_c)
+        min_gap = min_gap_for_washout_lorentzian_m(l_c)
+    else:
+        # None (R-46 effective-scalar default) and explicit "gaussian" share
+        # the Gaussian law V = 2^{-(2A/L_c)^2}, wash-out at A >= 1.1246 L_c.
+        visibility = fringe_visibility(reflector.gap_m, l_c)
+        min_gap = min_gap_for_washout_m(l_c)
     if visibility >= WASHOUT_VISIBILITY_MAX:
         msg = (
             f"route-2 wash-out criterion failed: V(A = {reflector.gap_m:.3e} m) = "
             f"{visibility:.3f} >= {WASHOUT_VISIBILITY_MAX:g} for L_c = {l_c:.3e} m "
-            f"(dlam = {source.linewidth_fwhm_m:.3e} m); the endface fringe is not "
-            f"washed out and the intensity model (R-14) does not apply. Increase the "
-            f"gap to A >= {min_gap_for_washout_m(l_c):.3e} m or widen the source "
-            "(doc 03 §f'; R-13)"
+            f"(dlam = {source.linewidth_fwhm_m:.3e} m, lineshape = "
+            f"{source.lineshape or 'gaussian (R-46 default)'}); the endface fringe is "
+            f"not washed out and the intensity model (R-14) does not apply. Increase "
+            f"the gap to A >= {min_gap:.3e} m or widen the source (doc 03 §f'; R-13)"
         )
         raise ValueError(msg)
 
