@@ -35,6 +35,9 @@ export function section() {
       mapRow("GUI", null, ["§3.1","s_ui_gui"], ["§7.10","s_impl_gui"], "src/optivibe/gui/","gui/"),
       mapRow("Композиция/пресеты", null, ["§3.4","s_cfg_subsys"], null, "src/optivibe/core/config/subsystems.py","core/config/subsystems.py"),
       mapRow("Отражатели (семейство)", ["§4.7","s_phys_reflectors"], null, null, "src/optivibe/optics/reflector.py","optics/reflector.py"),
+      mapRow("Демпфирование Q(L)", ["§4.2","s_phys_mech"], ["§6.2","s_algo_mech"], ["§7.5","s_impl_mech"], "src/optivibe/mechanics/damping.py","mechanics/damping.py"),
+      mapRow("Тепловой пол NEA_th", ["§4.4","s_phys_det"], ["§6.5","s_algo_dsp"], ["§7.9","s_impl_nea"], "src/optivibe/mechanics/thermal.py","mechanics/thermal.py"),
+      mapRow("Спектр источника (Δλ, V, RIN)", ["§4.3-бис","s_phys_src"], ["§6.3","s_algo_opt"], ["§7.6","s_impl_opt"], "src/optivibe/optics/source.py","optics/source.py"),
     ],
     [1750,1430,1430,1430,3320]
   ));

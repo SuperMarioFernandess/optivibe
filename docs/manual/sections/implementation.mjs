@@ -148,6 +148,19 @@ export function section() {
   K.push(links([ xr("Физика → §4.2","s_phys_mech"), sep(), xr("Алгоритм → §6.2","s_algo_mech"), sep(), flink("src/optivibe/mechanics/cantilever.py") ]));
 
 
+  K.push(H(3,"7.5-бис Демпфирование: вычислимая Q(L)","s_impl_damping"));
+  K.push(para([flink("src/optivibe/mechanics/damping.py","mechanics/damping.py"), R(" — модель добротности (документ 02 §5, 07 §2.3; решения R-47/R-48). Фактические имена функций:")]));
+  K.push(...code([
+    "reynolds_number(constants, omega_rad_s) -> float        # Re = ρ_f·ω·R²/μ_f",
+    "knudsen_number(constants) -> float                      # Kn ≈ 1.09e-3 (континуум)",
+    "hydrodynamic_function(reynolds) -> complex              # Γ_r + i·Γ_i (Sader 1998)",
+    "q_air(constants, length_m) -> float                     # (ρ + ρ_f·Γ_r)/(ρ_f·Γ_i)",
+    "q_anchor(constants, length_m) -> float                  # 2.17·(L/D)³",
+    "damping_budget(constants, length_m, *, vacuum=False)    # {air, anchor, structural, ted, total}",
+    "q_total_model(constants, length_m, *, vacuum=False)     # 1/Q = Σ 1/Q_i",
+  ]));
+  K.push(para([R("Точка вызова — не конвейер, а резолвинг композиции ("), c("SystemConfig.resolve"), R("): если "), c("q_total"), R(" опущен, он вычисляется и квантуется до 6 значащих цифр (иначе последний бит был бы платформозависим). При Re < 5 функция предупреждает в лог (не падает): усечённая асимптотика теряет ~1 % за пределами рабочего окна L = 1–5 мм.")]));
+
   K.push(H(2,"7.6 Оптика: компоненты η","s_impl_opt"));
   K.push(para([flink("src/optivibe/optics/cylinder.py","optics/cylinder.py"), R(" — замкнутые формы η = η_x·η_y (документ 03 §4):")]));
   K.push(...code([
@@ -166,6 +179,25 @@ export function section() {
     "    #   eta_y  = 1/sqrt(1 + (g/zR)**2)               # от dy НЕ зависит (симметрия)",
   ]));
   K.push(links([ xr("Физика → §4.3","s_phys_opt"), sep(), xr("Алгоритм → §6.3","s_algo_opt"), sep(), flink("src/optivibe/optics/cylinder.py") ]));
+
+  K.push(H(3,"7.6-бис Источник: ширина линии, видность, RIN","s_impl_source"));
+  K.push(para([flink("src/optivibe/optics/source.py","optics/source.py"), R(" — спектр источника (документ 03 §f′, 07 §1.2; решения R-46, R-55…R-57):")]));
+  K.push(...code([
+    "linewidth_nu_hz(wavelength_m, linewidth_fwhm_m)      # Δν = c·Δλ/λ²",
+    "coherence_length_m(wavelength_m, linewidth_fwhm_m)   # L_c = (2ln2/π)·λ²/Δλ",
+    "fringe_visibility(gap_m, coherence_length_m)             # гаусс:  V = 2^(−(2A/L_c)²)",
+    "fringe_visibility_lorentzian(gap_m, coherence_length_m)  # лоренц: V = 2^(−4A/L_c)",
+    "min_gap_for_washout_m(L_c)             # 1.1246·L_c   (V < 0.03)",
+    "min_gap_for_washout_lorentzian_m(L_c)  # 1.2647·L_c   (+12.5 %)",
+    "rin_ase(delta_nu_hz, *, lineshape=None) / rin_ase_db_hz(...)   # κ/Δν",
+    "RIN_KAPPA_BY_LINESHAPE = {rectangular: 2, gaussian: 1.3286, lorentzian: 0.6366}",
+    "# режим measured (табличный спектр OSA):",
+    "fringe_visibility_measured(...)      # прямая квадратура Винера–Хинчина",
+    "coherence_time_measured_s(...)       # τ_c (по Парсевалю)",
+    "effective_linewidth_measured_hz(...) # Δν_eff = 1/τ_c",
+    "rin_ase_measured(...) / rin_ase_measured_db_hz(...)   # RIN = 2/Δν_eff",
+  ]));
+  K.push(para([R("Проводка — в "), flink("src/optivibe/core/config/subsystems.py","core/config/subsystems.py"), R(": валидаторы "), c("_check_noise_inputs"), R(" / "), c("_check_lineshape_inputs"), R(" (правила пар «форма ↔ вход»; DFB обязан задать RIN явно), "), c("_effective_rin_db_hz"), R(" (вывод RIN), "), c("_check_source_coherence"), R(" (ворота смыва на маршруте 2 — громкий отказ при V ≥ 0.03).")]));
 
   K.push(H(2,"7.7 Детектор: фототок, шумы, АЦП","s_impl_det"));
   K.push(para([flink("src/optivibe/detector/photodiode.py","detector/photodiode.py"), R(" — фототок + шумовой бюджет (документ 07):")]));
@@ -229,6 +261,14 @@ export function section() {
     "    rin   = np.sqrt(n.psd_rin_a2_hz)   / abs(s_target)",
     "    return NeaResult(total=total, shot=shot, rin=rin, johnson=...)",
   ]));
+  K.push(para([R("(Фрагмент выше — иллюстративный.) Фактический контракт после M-12: "), c("NeaResult"), R(" несёт поля "), c("nea_optical"), R(", "), c("nea_thermal"), R(" и "), c("nea_plateau = hypot(optical, thermal)"), R("; функции "), c("nea_from_detector(..., include_thermal=True)"), R(" и "), c("nea_spectrum(..., include_thermal=True)"), R(" подмешивают тепловую ветвь "), R("в домене ускорения", { bold: true }), R(" (она не токовая PSD). Источник значения — "), flink("src/optivibe/mechanics/thermal.py","mechanics/thermal.py"), R(":")]));
+  K.push(...code([
+    "kinetic_effective_mass(constants, L)      # m_eff = 0.2427·ρSL  — задаёт ЧАСТОТУ",
+    "acceleration_effective_mass(constants, L) # M_a  = 0.5795·ρSL  — задаёт ПОЛ",
+    "thermal_force_psd(constants, L, q_total)  # S_F = 4kB·T·m_eff·ω1/Q   [Н²/Гц]",
+    "nea_thermal(constants, L, q_total)        # NEA_th = √(4kB·T·ω1/(Q·M_a))",
+  ]));
+  K.push(para([R("Разложение по ветвям в ускорительном домене — "), flink("src/optivibe/analysis/nea_budget.py","analysis/nea_budget.py"), R(" ("), c("{shot, rin, johnson, thermal, total}"), R("). Два намеренных «не» (решение R-54): "), c("nea_from_psd"), R(" (тракт измеренных записей) тепловую ветвь "), R("не добавляет", { bold: true }), R(" — иначе двойной учёт; синтетический временной ряд детектора теплового движения "), R("не содержит", { bold: true }), R(". Флаг "), c("include_thermal=False"), R(" бит-в-бит воспроизводит поведение до M-12.")]));
 
   K.push(H(2,"7.10 GUI: расчёт вне UI-потока","s_impl_gui"));
   K.push(para([R("Qt-free задача ("), flink("src/optivibe/gui/workers/jobs.py","gui/workers/jobs.py"), R(") вызывает ядро; "), c("JobWorker"), R(" исполняет её на "), c("QThread"), R(", "), c("JobController"), R(" управляет жизненным циклом и сигналами:")]));

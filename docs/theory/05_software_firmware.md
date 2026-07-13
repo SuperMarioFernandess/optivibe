@@ -4,12 +4,15 @@
 > (конвенции: сиды/воспроизводимость, реестры, границы), 11 (спецификация симулятора,
 > forward-цепочка), 17 (§1 словарь метрик, §7 единственность метрик), 05 (§2 калибровка,
 > §5.3 множитель, §7 NEA), 07 (шум→NEA), 04 (ICD-контракты). Решения: `R-20`, `R-21`, `R-42`
-> (журнал 06).
-> **Опора (код, сверено, `main` @ `ebb61a0`):** `dsp/` (`standard.py` `StandardDsp`;
+> (журнал 06); **`R-46`…`R-58`** (вычисляемые параметры композиции, 4-я ветвь NEA).
+> **Опора (код, сверено, `main` @ `758b874`):** `dsp/` (`standard.py` `StandardDsp`;
 > `calibration.py`, `kinematics.py`, `spectra.py`, `metrics.py`, `iso.py`, `nea.py`,
 > `sensitivity.py`), `pipeline/orchestrator.py` (`Pipeline`, `run_scenario`),
-> `analysis/instrument.py` (роль S-02), `io/{loaders,records}.py`, `cli/main.py`,
-> `core/types.py` (`VibrationResult`), `core/stages.py` (`DspStage`).
+> `analysis/instrument.py` (роль S-02), `analysis/nea_budget.py`, `analysis/variant_tools.py`,
+> `core/config/subsystems.py` (**разрешение композиции — точка вызова новых моделей**),
+> `mechanics/damping.py`, `mechanics/thermal.py`, `optics/source.py`,
+> `io/{loaders,records}.py`, `cli/main.py`, `core/types.py` (`VibrationResult`),
+> `core/stages.py` (`DspStage`).
 > **Эталон чисел:** прогон `examples/vibration_severity.yaml` (вариант B, тон 50 Гц/0.15g) —
 > метрики воспроизведены из кода.
 
@@ -111,15 +114,24 @@ Welch PSD (`scipy.signal.welch`, окно/сегмент/перекрытие и
 с теми же границами). Пороги — **данные**, не выводятся моделью (класс по умолчанию Group 2 /
 жёсткая опора: A/B 1.4, B/C 2.8, C/D 4.5 мм/с). **Литература.** ISO 10816-3 §5 / ISO 20816-3.
 
-### 3.6 NEA (приведение шума ко входу)
+### 3.6 NEA (приведение шума ко входу) — **четыре ветви** (`R-54`)
 
 $$
-NEA(f)=\dfrac{i_n(f)}{|s_{target}(f)|}\quad(\text{блок 3}),\qquad
+NEA(f)=\underbrace{\dfrac{i_n(f)}{|s_{target}(f)|}}_{\text{три токовые ветви}}\ \oplus\ NEA_{th}
+\quad(\text{вывод — блок 3 §3.5}),\qquad
 NEA_{полн}=NEA\cdot\sqrt{B}.
 $$
 
-`nea_from_detector` берёт PSD из метаданных детектора; для stub-детектора (без шума) →
-`None`. **Размерность.** `[(А/√Гц)/(А/(м/с²))]=(м/с²)/√Гц` ✔.
+`nea_from_detector` / `nea_spectrum` берут PSD тока из метаданных детектора и **добавляют
+тепловую ветвь квадратурно в ускорительном домене** (`include_thermal=True` по умолчанию;
+`False` бит-точно воспроизводит до-M-12 поведение). Для stub-детектора (без шума) → `None`.
+
+**Важное исключение (анти-даблкаунт, `R-54`(б)):** `nea_from_psd` — путь **измеренных** записей
+(роль S-02) — тепловую ветвь **не добавляет**: реальный фототок уже содержит броуновское движение
+консоли. Это не забывчивость, а контракт: аналитический бюджет и измеренный спектр — разные
+источники, и складывать их нельзя.
+
+**Размерность.** `[(А/√Гц)/(А/(м/с²))]=(м/с²)/√Гц` ✔; `NEA_th` уже в `(м/с²)/√Гц` ✔.
 
 ---
 
@@ -164,10 +176,28 @@ Forward `ForwardArtifacts` → инверсия `RunArtifacts.result: VibrationR
 | 2 кинематика | `integrate_frequency`/`integrate_time` (`INTEGRATOR_REGISTRY`), `highpass_mask` | `a`→`(v,x)` | scipy.integrate/signal |
 | 3 спектр/доминанты | `welch_psd`, `amplitude_spectrum`, `dominant_frequencies` | `a`→`Spectrum`, кортеж Гц | scipy.signal (`welch`,`find_peaks`) |
 | 4 метрики/ISO | `rms`, `second_harmonic_ratio`, `band_rms_velocity`, `iso_assessment`, `classify_velocity_rms` | →`rms`,`cross_residual`,`iso` | numpy |
-| 5 NEA | `nea_from_detector`, `nea_from_psd`, `nea_spectrum` | `noise`→`NeaResult` | numpy |
+| 5 NEA | `nea_from_detector`, `nea_from_psd`, `nea_spectrum` (+ `mechanics.thermal.nea_thermal`) | `noise`→`NeaResult` (`nea_optical`, `nea_thermal`, `nea_plateau`) | numpy |
 
 Реестры: `DSP_REGISTRY` (`stub`/`standard`), `INTEGRATOR_REGISTRY` (`frequency`/`time`),
 `SENSITIVITY_REGISTRY` (`static`/`operating_point`/`nonlinear_curve`/`measured`).
+
+### 5.2′ Слой разрешения композиции — где живут новые модели (M-01/M-02/M-10)
+
+Три новых физических модуля вызываются **не из конвейера**, а на границе конфигурации —
+`core/config/subsystems.py::SystemConfig.resolve` (композиция → разрешённый `VariantConfig`):
+
+| Что | Модуль | Когда вызывается |
+|---|---|---|
+| `q_total` (если `q_total: null`) | `mechanics/damping.py::q_total_model` | всегда при разрешении A–D (`R-48`) |
+| `rin_db_hz` (если опущен) | `optics/source.py::rin_ase_db_hz` / `rin_ase_measured_db_hz` | SLD с `Δλ`/таблицей спектра (`R-46`/`R-57`) |
+| ворота смыва `V(A)<0.03` | `optics/source.py::min_gap_for_washout_m[_lorentzian]` | маршрут 2 при заданной `Δλ` (`R-46`/`R-55`) |
+| `NEA_th` | `mechanics/thermal.py::nea_thermal` | **не** при разрешении, а в бюджете NEA (`R-54`) |
+
+Архитектурно это важно: **разрешённый контракт не расширился** — `Δλ`, `lineshape`, таблица
+спектра и `NEA_th` в него **не входят** (композиционные / выводимые величины), поэтому побитовый
+контракт A–D и sha эталона держатся. Вычисляемые поля контракта (`q_total`, выведенный
+`rin_db_hz`) квантуются до **6 значащих цифр** — иначе последний бит мантиссы libm
+платформозависим (`R-51`).
 
 ### 5.3 Роль S-02 и CLI/IO
 
@@ -191,6 +221,10 @@ cumulative_trapezoid), `pydantic v2` (сценарии/спеки/опции). �
 **(а) Реализовано в двойнике:**
 - Полный инверсный тракт `StandardDsp` (калибровка→кинематика→спектры/доминанты→метрики/ISO→
   NEA) — `dsp/`.
+- **Четвёртая ветвь NEA** (тепловой пол) в аналитическом бюджете и спектре NEA, с переключателем
+  `include_thermal` и анти-даблкаунтом на тракте измеренных записей (`R-54`).
+- **Вычисляемые параметры композиции** (`q_total` из `Q(L)`, `rin_db_hz` из `Δλ`/спектра, ворота
+  смыва) — `core/config/subsystems.py` + `mechanics/damping.py`, `optics/source.py`.
 - Роль S-02 (анализ реальных записей, model/measured/bench, G9) — `analysis/instrument.py`
   (`SW-52`).
 - Оба режима usage_modes (а)/(б); воспроизводимость по seed (10 §8).
@@ -213,8 +247,11 @@ cumulative_trapezoid), `pydantic v2` (сценарии/спеки/опции). �
 (метрики), §7 (единственность); 05 §2/§5.3/§7 (калибровка/множитель/NEA); 07 (шум→NEA); 04
 (ICD, `VibrationResult`).
 **Решения:** `R-20` (разрешение `O-08`, множитель), `R-21` (внерезонансный режим калибровки),
-`R-42` (знак `s_target`).
-**Код (`main`):** `dsp/standard.py`+помощники, `pipeline/orchestrator.py`,
+`R-42` (знак `s_target`), **`R-48`/`R-51`** (вычисляемый `q_total`, квантование контракта),
+**`R-54`** (4-я ветвь NEA, анти-даблкаунт), **`R-46`/`R-57`** (вычисляемый `rin_db_hz`, ворота смыва).
+**Код (`main`):** `dsp/standard.py`+помощники, `dsp/nea.py`, `analysis/nea_budget.py`,
+`analysis/variant_tools.py`, `core/config/subsystems.py`, `mechanics/damping.py`,
+`mechanics/thermal.py`, `optics/source.py`, `pipeline/orchestrator.py`,
 `analysis/instrument.py`, `io/`, `cli/main.py`, `core/types.py`, `core/stages.py`.
 **Смежные блоки:** 1 (наклон, `2f/1f`↔bias), 3 (шум→NEA, `s_target`), 4 (вычислитель —
 железо/прошивка замысел). Режимы, включая нереализованный real-time — `usage_modes.md`.

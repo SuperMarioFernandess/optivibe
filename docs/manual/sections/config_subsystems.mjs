@@ -30,7 +30,7 @@ export function section() {
   K.push(tbl(
     ["Подсистема", "Модель (pydantic)", "Ключевые поля → плоский VariantConfig", "Пресеты"],
     [
-      ["источник", "SourceConfig", "source_kind, wavelength_m, power_w, rin_db_hz", "configs/presets/source/"],
+      ["источник", "SourceConfig", "source_kind, wavelength_m, power_w, rin_db_hz (вычисляется, если опущен), linewidth_fwhm_m, lineshape, spectrum_wavelength_m/spectrum_psd", "configs/presets/source/"],
       ["волокно", "FiberConfig", "mode_field_radius_m→optics, fresnel_R1→endface_reflectivity", "configs/presets/fiber/"],
       ["консоль", "CantileverConfig", "length_m→length_m; material (информац., 01 §4)", "configs/presets/cantilever/"],
       ["отражатель", "ReflectorConfig", "shape, curvature_radius_m, metallization_rho, gap_m, bias_offset_m, wedge_angle_rad", "configs/presets/reflector/"],
@@ -48,7 +48,7 @@ export function section() {
     "name: B",
     "band: { f_min_hz: 1.0, f_max_hz: 10000.0 }",
     "full_scale_g: 50.0",
-    "q_total: 2610.0            # Q при L=2.0 мм (07 §4.3)",
+    "q_total: null              # ВЫЧИСЛЯЕТСЯ моделью Q(L) → 2606.49 (R-48)",
     "cantilever:",
     "  preset: silica",
     "  overrides: { length_m: 2.0e-3 }   # L = 2.0 мм",
@@ -59,6 +59,16 @@ export function section() {
     "",
     "# в коде:  variant = SystemConfig(...).resolve(PresetStore(config_dir))",
   ]));
+  K.push(H(3, "Вычисляемые поля: q_total и rin_db_hz (что задавать, а что нет)", "s_cfg_computed"));
+  K.push(para([R("Два поля, которые раньше были числами из таблицы, теперь "), R("вычисляются при резолвинге", { bold: true }), R(" — и это меняет то, как заполняется композиция.")]));
+  K.push(...nums([
+    [c("q_total"), R(" — "), R("оставьте пустым (null)", { bold: true }), R(". Добротность считает модель Q(L) (воздух + заделка + внутренние потери; "), flink("src/optivibe/mechanics/damping.py", "mechanics/damping.py"), R("): для L = 2.0 мм получается 2606.49. Все поставляемые варианты A/B/C/D идут с "), c("q_total: null"), R(". Явно заданное число остаётся приоритетным "), R("переопределением (override)", { bold: true }), R(" — используйте его только тогда, когда Q измерена на стенде (ring-down).")],
+    [c("rin_db_hz"), R(" — "), R("либо задайте явно, либо дайте модели вывести его", { bold: true }), R(". Если поле опущено, а источник — SLD, RIN выводится из ширины линии "), c("linewidth_fwhm_m"), R(" (Δλ) и формы линии "), c("lineshape"), R(" как пол ASE-биения, либо из табличного спектра ("), c("lineshape: measured"), R("). Поставляемые пресеты SLD/DFB задают RIN явно (−126 / −155 дБ/Гц) — это тоже override. Для DFB вывод RIN из Δλ "), R("запрещён", { bold: true }), R(" (соотношение справедливо только для теплового/ASE-света): без явного "), c("rin_db_hz"), R(" композиция не соберётся.")],
+  ], "n2"));
+  K.push(para([R("Правила пар «форма линии ↔ вход» (валидатор откажет громко): аналитическая форма ("), c("gaussian"), R("/"), c("lorentzian"), R(") "), R("требует", { bold: true }), R(" "), c("linewidth_fwhm_m"), R("; режим "), c("measured"), R(" "), R("требует", { bold: true }), R(" обе колонки таблицы ("), c("spectrum_wavelength_m"), R(", "), c("spectrum_psd"), R(") и "), R("запрещает", { bold: true }), R(" скалярную Δλ (единственный источник истины — таблица); центральная λ должна лежать внутри диапазона таблицы. Таблица спектра задаётся пока "), R("инлайн в YAML", { italics: true }), R(" — загрузка CSV-трассы OSA с провенансом и неопределённостями отложена (бэклог S-13/M-15).")]));
+  K.push(para([R("Ворота когерентного смыва. "), R("Если задана Δλ и выбран маршрут 2, при резолвинге проверяется условие V(A) < 0.03 при номинальном зазоре. Не прошло — "), R("громкая ошибка", { bold: true }), R(" (интенсивностная модель сигнала неприменима, см. §4.3-бис), а не тихий откат. Для лоренцевой формы линии критерий строже на 12.5 % (A ≥ 1.2647·L_c против 1.1246·L_c).")]));
+  K.push(para([R("Контракт не расширился: Δλ, "), c("lineshape"), R(" и таблица спектра — "), R("композиционные", { italics: true }), R(" поля; в разрешённый "), c("VariantConfig"), R(" они не попадают (туда идёт уже скалярный "), c("rin_db_hz"), R("). Вычисляемые числа контракта ("), c("q_total"), R(" и выведенный "), c("rin_db_hz"), R(") округляются до 6 значащих цифр — иначе последний бит был бы платформозависим (R-51).")]));
+
   K.push(para([R("При резолвинге проверяются межподсистемные геометрические ограничения (рабочее время дублируется на время конфигурации): для curved-форм "), c("R_c ≥ 5·w0"), R(" и пятно "), c("w(A) ≤ R_c/3"), R("; для клина "), c("|α_w| ≤ 0.15 рад"), R(" ("), c("_check_composition_geometry"), R(", зеркалит "), flink("src/optivibe/optics/cylinder.py", "optics/cylinder.py"), R("). Нарушение — громкая ошибка, прогон помечается как неуспешный (без тихого отката).")]));
 
   // ---- five-block: Save/Load ----
