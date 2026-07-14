@@ -250,3 +250,144 @@ def test_edited_composition_run_off_thread(qtbot) -> None:
     assert isinstance(artifacts, RunArtifacts)
     assert artifacts.variant.length_m == pytest.approx(1.8e-3)
     assert artifacts.result.dominant_freqs_hz[0] == pytest.approx(200.0, abs=1.0)
+
+
+# --------------------------------------------------------------------------- #
+# S-13 GUI: source lineshape/spectrum entry, computed Q(L), thermal NEA branch.
+# --------------------------------------------------------------------------- #
+def _spectrum_artifact(directory: Path) -> Path:
+    """A Gaussian OSA characterization artifact (sidecar + CSV; doc 16 §2a)."""
+    import math
+
+    import numpy as np
+    import yaml
+
+    lam = np.linspace(1450.0, 1650.0, 401)
+    sigma = 60.0 / (2.0 * math.sqrt(2.0 * math.log(2.0)))
+    psd = np.exp(-0.5 * ((lam - 1550.0) / sigma) ** 2)
+    np.savetxt(directory / "sp.csv", np.column_stack([lam, psd]), delimiter=",")
+    sidecar = directory / "sp.yaml"
+    sidecar.write_text(
+        yaml.safe_dump(
+            {
+                "kind": "spectrum",
+                "instrument": "OSA",
+                "timestamp": "2026-07-10T09:00:00Z",
+                "data_file": "sp.csv",
+                "columns": {
+                    "x": {"name": "l", "unit": "nm"},
+                    "y": {"name": "S", "unit": "arb"},
+                },
+                "uncertainties": {"wavelength_m": 0.5e-9},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return sidecar
+
+
+def test_source_form_defaults_add_no_lineshape(qtbot) -> None:
+    """An untouched source form emits no lineshape/table keys (R-46 default)."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+    overrides = window.control_panel.system_payload()["source"]["overrides"]
+    assert "lineshape" not in overrides
+    assert "spectrum_wavelength_m" not in overrides
+
+
+def test_source_form_loads_measured_spectrum(qtbot, tmp_path: Path) -> None:
+    """Loading a spectrum artifact enables lineshape='measured' (M-10 rules).
+
+    The overrides then carry the table and force ``linewidth_fwhm_m = None``
+    (single source of truth, R-57(a)); switching back to the default drops the
+    table from the payload again.
+    """
+    window = MainWindow()
+    qtbot.addWidget(window)
+    source = window.control_panel.system._source
+    source.load_spectrum_artifact(_spectrum_artifact(tmp_path))
+    overrides = source.overrides()
+    assert overrides["lineshape"] == "measured"
+    assert len(overrides["spectrum_wavelength_m"]) == 401
+    assert overrides["linewidth_fwhm_m"] is None
+    assert "sha" in source._spectrum_note.text()
+    source._lineshape.setCurrentText("(default)")
+    overrides = source.overrides()
+    assert "lineshape" not in overrides
+    assert "spectrum_wavelength_m" not in overrides
+
+
+def test_source_form_rejects_non_spectrum_artifact(qtbot, tmp_path: Path) -> None:
+    """A non-spectrum characterization artifact is refused by the loader."""
+    import yaml
+
+    sidecar = tmp_path / "L.yaml"
+    sidecar.write_text(
+        yaml.safe_dump(
+            {
+                "kind": "scalar",
+                "instrument": "caliper",
+                "timestamp": "t",
+                "parameter": "length_m",
+                "value": 4.0,
+                "unit": "mm",
+                "u": 0.02,
+            }
+        ),
+        encoding="utf-8",
+    )
+    window = MainWindow()
+    qtbot.addWidget(window)
+    with pytest.raises(ValueError, match="not a spectrum"):
+        window.control_panel.system._source.load_spectrum_artifact(sidecar)
+
+
+def test_q_total_model_hint_is_shown(qtbot) -> None:
+    """The computed Q(L) value is displayed next to the override field (M-02)."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+    panel = window.control_panel.system
+    text = panel._q_model.text()
+    assert "Q(L) model:" in text and "n/a" not in text
+    # It follows the cantilever length: a shorter fiber -> different Q.
+    panel._cantilever._edits["length_m"].setText("1.8e-3")
+    panel.refresh_q_model()
+    assert panel._q_model.text() != text
+
+
+def test_live_nea_panel_draws_thermal_branch(qtbot) -> None:
+    """show_nea draws all four plateau branches incl. thermal (M-12 visible)."""
+    import numpy as np
+
+    from optivibe.analysis.nea_budget import NeaBudget
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    freq = np.linspace(1.0, 1000.0, 32)
+    level = 1.0e-4
+    nea = NeaBudget(
+        freq_hz=freq,
+        nea_density=np.full_like(freq, 2.0 * level),
+        nea_plateau=2.0 * level,
+        nea_full_band=2.0 * level * np.sqrt(999.0),
+        bandwidth_hz=999.0,
+        contributions={
+            "shot": level,
+            "rin": level,
+            "johnson": level,
+            "thermal": level,
+            "total": 2.0 * level,
+        },
+        nea_thermal=level,
+        psd_components={},
+        psd_total_analytic=1.0,
+        psd_rel_error=0.0,
+        reference_arm="matched",
+        s_target=1.0,
+        velocity_floor_rms=0.0,
+        displacement_floor_rms=0.0,
+    )
+    live = window.plot
+    live.show_nea(nea)
+    names = {item.name() for item in live._p_nea.listDataItems() if item.name() is not None}
+    assert {"shot", "rin", "johnson", "thermal"} <= names

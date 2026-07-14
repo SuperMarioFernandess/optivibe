@@ -64,8 +64,25 @@ _FieldSpec = tuple[str, str, str, str]
 _SOURCE_FIELDS: tuple[_FieldSpec, ...] = (
     ("wavelength_m", "wavelength lambda", "m", "Centre wavelength (doc 03 §1; 1550 nm)"),
     ("power_w", "optical power P", "W", "Power delivered to the fiber (doc 07 §2)"),
-    ("rin_db_hz", "RIN", "dB/Hz", "Relative intensity noise (doc 07 §1.2)"),
+    (
+        "rin_db_hz",
+        "RIN",
+        "dB/Hz",
+        "Relative intensity noise (doc 07 §1.2); blank for an SLD with a "
+        "linewidth = derived ASE floor 2/dnu (M-01); an explicit value replaces "
+        "the floor (anti-double-count R-57(v))",
+    ),
+    (
+        "linewidth_fwhm_m",
+        "linewidth dlam FWHM",
+        "m",
+        "Spectral FWHM (doc 03 §f'; M-01): drives the derived RIN and the "
+        "route-2 wash-out check; forbidden next to a measured spectrum (R-57(a))",
+    ),
 )
+#: Source lineshape options (M-10): "(default)" keeps the R-46 effective-scalar
+#: behaviour; "measured" is enabled only once a spectrum artifact is loaded.
+_LINESHAPES = ("(default)", "gaussian", "lorentzian", "measured")
 _FIBER_FIELDS: tuple[_FieldSpec, ...] = (
     ("mode_field_radius_m", "mode-field radius w0", "m", "Gaussian mode radius (doc 03 §1)"),
     ("fresnel_R1", "endface reflectivity R1", "-", "Fresnel reflectivity (doc 04 §4)"),
@@ -191,6 +208,153 @@ class _SubsystemForm(QGroupBox):
         return {"preset": self.preset_name(), "overrides": self.overrides()}
 
 
+class _SourceForm(_SubsystemForm):
+    """Source form with the M-10 lineshape selector and a spectrum loader.
+
+    Adds the ``lineshape`` combo ("(default)"/gaussian/lorentzian/measured) and
+    a "Load measured spectrum..." button -- the GUI entry point of the S-13
+    characterization input layer for the M-15 artifact. The ``measured`` option
+    stays disabled until a spectrum artifact (sidecar YAML + CSV, doc 16 §2a)
+    is loaded through :func:`optivibe.io.characterization.load_characterization`;
+    the loaded table then travels in the overrides exactly like a hand-written
+    one (the composition-level M-10 fields), so no new resolve path exists.
+    Per R-57(a) selecting ``measured`` forces ``linewidth_fwhm_m`` to ``None``
+    (the table is the single source of truth of its row).
+    """
+
+    _MEASURED_INDEX = _LINESHAPES.index("measured")
+
+    def __init__(self, store: PresetStore) -> None:
+        super().__init__("Source", "source", _SOURCE_FIELDS, store)
+        self._lineshape = QComboBox()
+        self._lineshape.addItems(_LINESHAPES)
+        self._lineshape.setToolTip(
+            "Source spectrum shape (M-10): default keeps the R-46 behaviour "
+            "(Gaussian visibility, rectangular RIN floor); measured needs a "
+            "loaded spectrum artifact (M-15/S-13)"
+        )
+        self._spectrum_lam: list[float] | None = None
+        self._spectrum_psd: list[float] | None = None
+        self._spectrum_note = QLabel("no measured spectrum loaded")
+        self._spectrum_button = QPushButton("Load measured spectrum...")
+        self._spectrum_button.setToolTip(
+            "Load a characterization artifact (sidecar YAML next to the OSA "
+            "CSV; doc 16 §2a) and enable lineshape = measured"
+        )
+        self._spectrum_button.clicked.connect(self._on_load_spectrum)
+        row = QHBoxLayout()
+        row.addWidget(self._spectrum_button)
+        row.addWidget(self._spectrum_note, stretch=1)
+        holder = QWidget()
+        holder.setLayout(row)
+        self._form.insertRow(1, "lineshape", self._lineshape)
+        self._form.insertRow(2, "spectrum", holder)
+        self._set_measured_enabled(False)
+
+    # ------------------------------------------------------------------ #
+    # Spectrum artifact
+    # ------------------------------------------------------------------ #
+    def _set_measured_enabled(self, enabled: bool) -> None:
+        """Enable/disable the ``measured`` combo entry (needs a loaded table)."""
+        model = self._lineshape.model()
+        item = model.item(self._MEASURED_INDEX)  # type: ignore[attr-defined]
+        if item is not None:
+            item.setEnabled(enabled)
+
+    def _on_load_spectrum(self) -> None:  # pragma: no cover - file dialog
+        """Pick a spectrum characterization sidecar and load it."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load spectrum artifact (sidecar)", "", "YAML (*.yaml *.yml)"
+        )
+        if path:
+            try:
+                self.load_spectrum_artifact(Path(path))
+            except (FileNotFoundError, ValueError) as exc:
+                logger.debug("spectrum artifact load failed: %s", exc)
+                self._spectrum_note.setText(f"load failed: {exc}")
+
+    def load_spectrum_artifact(self, path: Path) -> None:
+        """Load a ``kind = "spectrum"`` characterization artifact into the form.
+
+        Parameters
+        ----------
+        path : pathlib.Path
+            Sidecar YAML of the artifact (doc 16 §2a).
+
+        Raises
+        ------
+        ValueError
+            If the artifact is not a spectrum or is malformed.
+        FileNotFoundError
+            If the sidecar or its data file is missing.
+        """
+        from optivibe.io.characterization import load_characterization
+
+        result = load_characterization(path)
+        if result.spectrum_wavelength_m is None or result.spectrum_psd is None:
+            msg = f"{path.name} is a {result.provenance.kind!r} artifact, not a spectrum"
+            raise ValueError(msg)
+        self._set_spectrum(
+            list(result.spectrum_wavelength_m),
+            list(result.spectrum_psd),
+            note=f"{result.provenance.data_file} ({result.provenance.instrument}, "
+            f"{result.provenance.timestamp}; sha {str(result.provenance.sha256)[:8]})",
+        )
+        self._lineshape.setCurrentText("measured")
+
+    def _set_spectrum(self, lam: list[float], psd: list[float], *, note: str) -> None:
+        """Attach a spectrum table to the form and enable ``measured``."""
+        self._spectrum_lam = lam
+        self._spectrum_psd = psd
+        self._spectrum_note.setText(note)
+        self._set_measured_enabled(True)
+
+    def _clear_spectrum(self) -> None:
+        """Drop the attached table (preset change / non-measured composition)."""
+        self._spectrum_lam = None
+        self._spectrum_psd = None
+        self._spectrum_note.setText("no measured spectrum loaded")
+        self._set_measured_enabled(False)
+        if self._lineshape.currentText() == "measured":
+            self._lineshape.setCurrentText("(default)")
+
+    # ------------------------------------------------------------------ #
+    # Seeding / payload
+    # ------------------------------------------------------------------ #
+    def _reseed(self, preset: str, overrides: dict[str, Any]) -> None:
+        """Reseed the base fields, then the lineshape + table state."""
+        super()._reseed(preset, overrides)
+        if not hasattr(self, "_lineshape"):  # base __init__ path
+            return
+        try:
+            values = subsystem_defaults(self._store, self._subsystem, preset)
+        except (ValueError, KeyError):  # pragma: no cover - bad preset on disk
+            return
+        values.update(overrides)
+        lam = values.get("spectrum_wavelength_m")
+        psd = values.get("spectrum_psd")
+        if lam and psd:
+            self._set_spectrum(list(lam), list(psd), note="from the composition overrides")
+        else:
+            self._clear_spectrum()
+        shape = values.get("lineshape")
+        self._lineshape.setCurrentText(str(shape) if shape else "(default)")
+
+    def overrides(self) -> dict[str, Any]:
+        """Collect the base fields plus the lineshape/table state (M-10 rules)."""
+        out = super().overrides()
+        shape = self._lineshape.currentText()
+        if shape == "measured":
+            out["lineshape"] = "measured"
+            out["spectrum_wavelength_m"] = self._spectrum_lam
+            out["spectrum_psd"] = self._spectrum_psd
+            # R-57(a): the table is the single source of truth of its row.
+            out["linewidth_fwhm_m"] = None
+        elif shape != "(default)":
+            out["lineshape"] = shape
+        return out
+
+
 class _ReflectorForm(_SubsystemForm):
     """Reflector form with a shape selector and dynamic per-shape parameters.
 
@@ -293,12 +457,22 @@ class SystemBuilderPanel(QWidget):
         self._route.addItems(("2", "1"))
         self._eta_bias = _line("0.25")
         self._q_total = _line()  # empty = computed by the Q(L) model (R-48)
+        self._q_total.setToolTip(
+            "Total quality factor of mode 1. Since M-02 this is a COMPUTED "
+            "quantity (Q(L) damping model, R-47/R-48): leave blank to use the "
+            "model value shown below; a typed value is an explicit override"
+        )
+        self._q_model = QLabel("Q(L) model: -")
+        self._q_model.setToolTip(
+            "What a blank Q field resolves to: the Q(L) damping model at the "
+            "current cantilever length and vacuum flag (M-02)"
+        )
         self._target_nea = _line("10.0")
         self._vacuum = QCheckBox("vacuum")
         self._mode.currentTextChanged.connect(self._on_mode_changed)
 
         # Subsystem forms.
-        self._source = _SubsystemForm("Source", "source", _SOURCE_FIELDS, self._store)
+        self._source = _SourceForm(self._store)
         self._fiber = _SubsystemForm("Fiber line", "fiber", _FIBER_FIELDS, self._store)
         self._cantilever = _SubsystemForm(
             "Cantilever",
@@ -322,6 +496,13 @@ class SystemBuilderPanel(QWidget):
         self._load_button = QPushButton("Load...")
         self._save_button.clicked.connect(self._on_save)
         self._load_button.clicked.connect(self._on_load)
+
+        # Keep the computed-Q(L) display in step with what it depends on:
+        # the cantilever choice (preset or length override) and the vacuum
+        # flag (the model drops the air channel under vacuum; M-02).
+        self._vacuum.toggled.connect(lambda _checked: self.refresh_q_model())
+        self._cantilever._preset.currentTextChanged.connect(lambda _name: self.refresh_q_model())
+        self._cantilever._edits["length_m"].editingFinished.connect(self.refresh_q_model)
 
         layout = QVBoxLayout(self)
         layout.addWidget(self._system_group())
@@ -356,7 +537,8 @@ class SystemBuilderPanel(QWidget):
         form.addRow("full scale [g]", self._full_scale)
         form.addRow("route", self._route)
         form.addRow("eta_bias (stub)", self._eta_bias)
-        form.addRow("Q total (blank = Q(L) model)", self._q_total)
+        form.addRow("Q total override (blank = Q(L) model)", self._q_total)
+        form.addRow("", self._q_model)
         form.addRow("target NEA [ug/rtHz]", self._target_nea)
         form.addRow(self._vacuum)
         return group
@@ -405,6 +587,30 @@ class SystemBuilderPanel(QWidget):
         self._balanced.setChecked(bool(det.get("balanced", True)))
         self._reference_arm.setCurrentText(str(det.get("reference_arm", "matched")))
         self._adc_bits.setValue(int(det.get("adc_bits", 24)))
+        self.refresh_q_model()
+
+    def refresh_q_model(self) -> None:
+        """Refresh the computed-``Q(L)`` display next to the override field.
+
+        Delegates the evaluation to the Qt-free controller helper
+        :func:`optivibe.gui.controllers.system_builder.model_q_total` (thin
+        shell, 09 §9); an invalid cantilever state degrades to a visible
+        "n/a", never a crash (10 §7 applies to the *build*, not to a live
+        hint label).
+        """
+        from optivibe.gui.controllers.system_builder import model_q_total
+
+        try:
+            q_value = model_q_total(
+                self._config_dir,
+                self._cantilever.ref_payload(),
+                vacuum=self._vacuum.isChecked(),
+            )
+        except (ValueError, KeyError, FileNotFoundError) as exc:
+            logger.debug("Q(L) hint unavailable: %s", exc)
+            self._q_model.setText("Q(L) model: n/a (check the cantilever fields)")
+            return
+        self._q_model.setText(f"Q(L) model: {q_value:.6g} (used when the field above is blank)")
 
     def _on_save(self) -> None:  # pragma: no cover - file dialog
         """Save the current composition under ``configs/user/systems``."""

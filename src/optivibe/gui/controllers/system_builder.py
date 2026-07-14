@@ -49,6 +49,7 @@ if TYPE_CHECKING:
 __all__ = [
     "SUBSYSTEM_MODELS",
     "build_system_config",
+    "model_q_total",
     "resolve_system_variant",
     "subsystem_defaults",
     "system_to_payload",
@@ -161,6 +162,51 @@ def subsystem_defaults(store: PresetStore, subsystem: str, preset: str) -> dict[
     }[subsystem]
     model = builder(SubsystemRef(preset=preset))
     return model.model_dump(mode="python")
+
+
+def model_q_total(
+    config_dir: Path,
+    cantilever_ref: Mapping[str, Any],
+    *,
+    vacuum: bool,
+) -> float:
+    """Evaluate the ``Q(L)`` damping model for a form's cantilever choice (M-02).
+
+    Qt-free helper for the composition editor: since M-02 ``q_total`` is a
+    *computed* quantity (air + anchor + internal losses at the chosen length;
+    R-47/R-48) and an explicit form value is an **override**. The form shows
+    this model value next to the field so the operator sees what a blank field
+    resolves to. This is the same closed-form evaluation ``resolve`` performs
+    -- a scalar formula, not a pipeline run, so it does not violate the
+    off-UI-thread invariant for heavy computation (SW-06); it still lives here,
+    not in the widget, to keep the thin-shell rule (09 §9: no physics in
+    widgets) and to stay display-less-testable.
+
+    Parameters
+    ----------
+    config_dir : pathlib.Path
+        Configuration root (presets + ``constants.yaml``).
+    cantilever_ref : mapping
+        The cantilever ``{preset, overrides}`` block from the form payload.
+    vacuum : bool
+        Whether the composition removes the air channel (A/D option).
+
+    Returns
+    -------
+    float
+        The model ``Q(L)`` (unquantized display value).
+
+    Raises
+    ------
+    ValueError
+        If the preset is unknown or the overrides are invalid.
+    """
+    from optivibe.mechanics.damping import q_total_model
+
+    store = PresetStore(config_dir)
+    cantilever = store.build_cantilever(SubsystemRef.model_validate(dict(cantilever_ref)))
+    constants = load_constants(config_dir / "constants.yaml")
+    return q_total_model(constants, cantilever.length_m, vacuum=vacuum)
 
 
 def system_to_payload(system: SystemConfig) -> dict[str, Any]:

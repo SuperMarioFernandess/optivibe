@@ -16,6 +16,10 @@ Subcommands
     Analyze a recorded real-instrument output (photocurrent record + instrument
     config -> the 17 §1 metrics through the standard inverse chain, bypassing
     the forward model): role S-02, doc 20 §5.
+``ingest <sidecar.yaml ...>``
+    Apply measured characterization artifacts (phase 0, doc 20 §1) to a base
+    composition and write the measurement-backed twin configuration plus its
+    provenance sidecar: task S-13, doc 16 §2a.
 """
 
 from __future__ import annotations
@@ -103,6 +107,37 @@ def build_parser() -> argparse.ArgumentParser:
         "--config-dir", type=Path, default=None, help="override the configs/ dir"
     )
     analyze_p.set_defaults(func=_cmd_analyze)
+
+    ingest_p = sub.add_parser(
+        "ingest", help="apply measured characterization artifacts to a composition (S-13)"
+    )
+    ingest_p.add_argument(
+        "measurements",
+        type=Path,
+        nargs="+",
+        help="characterization sidecar YAML files (doc 16 §2a; each next to its CSV)",
+    )
+    ingest_p.add_argument(
+        "--base",
+        type=str,
+        default="proto_poc",
+        help="base composition: a variant name (configs/variants/) or a YAML path "
+        "(default: proto_poc)",
+    )
+    ingest_p.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="output composition YAML (default: configs/user/systems/<base>_measured.yaml); "
+        "provenance is written next to it as <out stem>.provenance.yaml",
+    )
+    ingest_p.add_argument("--config-dir", type=Path, default=None, help="override the configs/ dir")
+    ingest_p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the ingest report without writing files",
+    )
+    ingest_p.set_defaults(func=_cmd_ingest)
     return parser
 
 
@@ -163,10 +198,11 @@ def _cmd_report(args: argparse.Namespace) -> int:
             "NEA budget (plateau):",
             f"  plateau           : {nb.nea_plateau / G0 * 1e6:.3g} ug/sqrt(Hz)",
             f"  full band         : {nb.nea_full_band / G0 * 1e6:.4g} ug (RMS)",
-            f"  shot/rin/johnson  : "
+            f"  shot/rin/johnson/thermal : "
             f"{nb.contributions['shot'] / G0 * 1e6:.3g} / "
             f"{nb.contributions['rin'] / G0 * 1e6:.3g} / "
-            f"{nb.contributions['johnson'] / G0 * 1e6:.3g} ug/sqrt(Hz)",
+            f"{nb.contributions['johnson'] / G0 * 1e6:.3g} / "
+            f"{nb.contributions.get('thermal', 0.0) / G0 * 1e6:.3g} ug/sqrt(Hz)",
             f"  analytic rel err  : {nb.psd_rel_error:.2e} (ref arm {nb.reference_arm})",
         ]
     sys.stdout.write("\n".join(out) + "\n")
@@ -291,6 +327,54 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
         logger.error("analyze failed: %s", exc)
         return 2
     sys.stdout.write(_format_analysis(analysis) + "\n")
+    return 0
+
+
+def _cmd_ingest(args: argparse.Namespace) -> int:
+    """Execute the ``ingest`` subcommand (task S-13; doc 16 §2a).
+
+    Loads the base composition, applies the measured artifacts as overrides
+    (anti-double-count rules live in :mod:`optivibe.io.ingest`), *resolves* the
+    result to run the composition-time guards (route-2 wash-out, geometry,
+    Q(L)), and -- unless ``--dry-run`` -- writes the composition YAML plus the
+    separate provenance sidecar.
+    """
+    from dataclasses import replace
+
+    from optivibe.core.config.loader import default_config_dir, load_constants
+    from optivibe.core.config.presets import (
+        PresetStore,
+        load_system_file,
+        save_system_config,
+    )
+    from optivibe.io.characterization import load_characterization
+    from optivibe.io.ingest import apply_measurements, save_provenance
+
+    config_dir = args.config_dir or default_config_dir()
+    base_path = Path(args.base)
+    if not base_path.is_file():
+        base_path = config_dir / "variants" / f"{args.base}.yaml"
+    try:
+        system = load_system_file(base_path)
+        constants = load_constants(config_dir / "constants.yaml")
+        results = [load_characterization(path) for path in args.measurements]
+        report = apply_measurements(system, results, constants=constants)
+        # Resolve to run the composition-time guards on the *measured* twin
+        # (route-2 wash-out on the measured spectrum, geometry, Q(L)); the
+        # resolved variant itself is not persisted here.
+        report.system.resolve(PresetStore(config_dir), constants=constants)
+    except (FileNotFoundError, ValueError) as exc:
+        logger.error("ingest failed: %s", exc)
+        return 2
+    sys.stdout.write(report.summary_text() + "\n")
+    if args.dry_run:
+        sys.stdout.write("dry run: nothing written\n")
+        return 0
+    out = args.out or (config_dir / "user" / "systems" / f"{system.name}_measured.yaml")
+    named = report.system.model_copy(update={"name": out.stem})
+    save_system_config(named, out)
+    prov = save_provenance(replace(report, system=named), out)
+    sys.stdout.write(f"composition written to {out}\nprovenance written to {prov}\n")
     return 0
 
 

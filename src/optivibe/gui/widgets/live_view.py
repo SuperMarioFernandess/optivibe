@@ -4,7 +4,7 @@ Renders, off nothing but core/analysis *results* (no DSP in the view): the
 cantilever bend animation; the time-domain input-vs-recovered acceleration; the
 detector signal; the recovered velocity and displacement; the recovered
 amplitude spectrum (``VibrationResult.spectrum``, computed by the core); and the
-NEA(f) density with its shot/RIN/Johnson plateau split (from the analysis
+NEA(f) density with its shot/RIN/Johnson/thermal plateau split (from the analysis
 ``NeaBudget``). Long series are decimated before drawing. The richer
 input-vs-recovered spectral overlay and the spectrogram live in the (matplotlib)
 Report tab, so this tab stays light and fast.
@@ -215,10 +215,12 @@ class LiveView(QWidget):
         if nea is None:
             self._p_nea.setTitle("NEA(f) - not available (use the photodiode detector)")
             return
-        self._p_nea.setTitle("NEA(f) with shot / RIN / Johnson plateaus")
+        self._p_nea.setTitle("NEA(f) with shot / RIN / Johnson / thermal plateaus")
         scale = 1.0e6 / _G0
         self._nea_total.setData(nea.freq_hz.tolist(), (nea.nea_density * scale).tolist())
-        colors = {"shot": "#d62728", "rin": "#2ca02c", "johnson": "#9467bd"}
+        # The fourth (Brownian thermal) branch of the budget (M-12, doc 07 §2):
+        # acceleration-domain, flat across the band like the referred trio.
+        colors = {"shot": "#d62728", "rin": "#2ca02c", "johnson": "#9467bd", "thermal": "#ff7f0e"}
         f_lo, f_hi = float(nea.freq_hz[0]), float(nea.freq_hz[-1])
         for key, color in colors.items():
             level = nea.contributions.get(key, 0.0) * scale
