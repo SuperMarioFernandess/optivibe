@@ -98,6 +98,7 @@ __all__ = [
     "ScalarReader",
     "SpectrumReader",
     "load_characterization",
+    "resolve_sidecar_path",
 ]
 
 # --------------------------------------------------------------------------- #
@@ -901,14 +902,58 @@ def _fit_circle(x: FloatArray, z: FloatArray) -> tuple[float, float, float]:
 # --------------------------------------------------------------------------- #
 # Entry point.
 # --------------------------------------------------------------------------- #
+def resolve_sidecar_path(path: Path | str) -> Path:
+    """Resolve a user-picked artifact path to its sidecar YAML.
+
+    The convention of doc 16 §2a is ``<id>.csv`` + ``<id>.yaml`` side by side,
+    so picking *either* file identifies the artifact: a ``.csv`` path hops to
+    the same-stem sidecar next to it; a ``.yaml``/``.yml`` path is returned as
+    is. Anything else fails loudly.
+
+    Parameters
+    ----------
+    path : pathlib.Path or str
+        Sidecar YAML or the CSV data file of one artifact.
+
+    Returns
+    -------
+    pathlib.Path
+        The sidecar path.
+
+    Raises
+    ------
+    FileNotFoundError
+        If a CSV was given and no same-stem sidecar exists next to it.
+    ValueError
+        On an unrecognised file extension.
+    """
+    given = Path(path)
+    suffix = given.suffix.lower()
+    if suffix in (".yaml", ".yml"):
+        return given
+    if suffix == ".csv":
+        for candidate in (given.with_suffix(".yaml"), given.with_suffix(".yml")):
+            if candidate.is_file():
+                return candidate
+        msg = (
+            f"no sidecar found next to {given.name}: a characterization artifact is "
+            f"the CSV plus a same-stem YAML sidecar declaring its units, instrument "
+            f"and uncertainties (doc 16 §2a) -- expected {given.with_suffix('.yaml').name}"
+        )
+        raise FileNotFoundError(msg)
+    msg = f"unrecognised artifact file {given.name!r}: pick the sidecar YAML or the CSV"
+    raise ValueError(msg)
+
+
 def load_characterization(sidecar_path: Path | str) -> CharacterizationResult:
-    """Load one characterization artifact from its sidecar YAML.
+    """Load one characterization artifact from its sidecar YAML (or its CSV).
 
     Parameters
     ----------
     sidecar_path : pathlib.Path or str
-        Path to the sidecar (``<id>.yaml``); ``data_file`` inside it is
-        resolved relative to the sidecar directory.
+        Path to the sidecar (``<id>.yaml``) or to the CSV data file (the
+        same-stem sidecar next to it is used, doc 16 §2a); ``data_file``
+        inside the sidecar is resolved relative to the sidecar directory.
 
     Returns
     -------
@@ -924,7 +969,7 @@ def load_characterization(sidecar_path: Path | str) -> CharacterizationResult:
         On a malformed sidecar, undeclared units, a malformed trace or a
         failed physical guard.
     """
-    path = Path(sidecar_path)
+    path = resolve_sidecar_path(sidecar_path)
     if not path.is_file():
         msg = f"characterization sidecar not found: {path}"
         raise FileNotFoundError(msg)

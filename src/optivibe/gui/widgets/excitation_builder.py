@@ -28,6 +28,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from optivibe.gui.widgets.ui_helpers import with_help
+
 __all__ = ["ExcitationBuilder"]
 
 _KINDS = (
@@ -44,6 +46,101 @@ _KINDS = (
     "hdf5",
 )
 _GENERATED = {"sine", "multitone", "sweep", "random", "shock"}
+
+_KIND_HELP = (
+    "What drives the sensor along the chosen axis:\n\n"
+    "sine / multitone / sweep / random / shock -- GENERATED waveforms on the "
+    "sampling grid below (fs, duration).\n"
+    "csv / wav / tdms / uff / mat / hdf5 -- REPLAY of a recorded acceleration "
+    "from a file (the grid comes from the file or the page fields; the "
+    "sampling row is hidden).\n\nThe excitation is ground acceleration in g "
+    "along one axis; pick the kind first, then fill its page."
+)
+_AXIS_HELP = (
+    "Excitation axis in the sensor frame (doc 00): x -- the TARGET axis of "
+    "the version-1 cylinder reflector (full response); y / z -- the cross "
+    "axes, used to probe the cross-axis sensitivity metric. For the "
+    "isotropic sphere the transverse axes are equivalent."
+)
+_SAMPLING_HELP = (
+    "Grid of the generated waveform: fs -- sample rate, Hz (keep fs >= "
+    "2.56 x the highest excited frequency for a clean spectrum); duration -- "
+    "record length, s (sets the spectral resolution df = 1/T and how many "
+    "periods the metrics average over). Hidden for file replay: the grid "
+    "then comes from the file."
+)
+_ABOUT = {
+    "sine": (
+        "single tone",
+        "One tone: frequency [Hz] and amplitude [g]. The basic probe of one "
+        "band point -- dominant-frequency recovery, 2f/1f distortion at a "
+        "bias~0 working point, RMS checks. Keep the frequency well below f1 "
+        "for off-resonance use.",
+    ),
+    "multitone": (
+        "sum of tones",
+        "A sum of components, each [frequency Hz, amplitude g] and an "
+        "optional per-tone phase [rad]. Add/remove components freely; probes "
+        "intermodulation and superposition. The crest factor grows with the "
+        "component count -- watch the full-scale clipping.",
+    ),
+    "sweep": (
+        "chirp f0 -> f1",
+        "A constant-amplitude chirp from f start to f end [Hz], linear or "
+        "log in frequency. The standard way to trace the frequency response "
+        "over the band in one run; log spacing spends more time at low "
+        "frequencies.",
+    ),
+    "random": (
+        "band-limited noise",
+        "Gaussian noise band-limited to [lo, hi] Hz with the given g RMS. "
+        "ISO-style broadband excitation; PSD-based metrics apply. The peak "
+        "factor is ~3-4x the RMS -- watch the full scale.",
+    ),
+    "shock": (
+        "half-sine pulse",
+        "A half-sine shock: peak [g], pulse width [ms], start delay [s]. "
+        "For transient/overload studies -- pair it with the modal_time "
+        "mechanics and the time integrator (Physics layers tab) for a "
+        "faithful transient.",
+    ),
+    "csv": (
+        "CSV replay",
+        "Replay a recorded acceleration column from a CSV: column index "
+        "(0-based), sample rate fs [Hz] (CSV stores no grid), units of the "
+        "stored values (m/s^2 or g).",
+    ),
+    "wav": (
+        "WAV replay",
+        "Replay a WAV channel as acceleration: channel index and the "
+        "full-scale mapping [g] (WAV samples are normalized to +/-1, so "
+        "full scale sets how many g that is).",
+    ),
+    "tdms": (
+        "NI TDMS replay",
+        "Replay an NI TDMS channel: group (blank = first), channel index, "
+        "fs [Hz] (0 = take wf_increment from the file), units of the stored "
+        "values.",
+    ),
+    "uff": (
+        "UFF/UNV replay",
+        "Replay a UFF/UNV dataset-58 record: dataset index, fs [Hz] (0 = "
+        "take the abscissa increment from the file), units of the stored "
+        "values.",
+    ),
+    "mat": (
+        "MATLAB replay",
+        "Replay a variable from a MATLAB .mat file: variable name, column "
+        "index for 2-D arrays, fs [Hz] (required -- .mat stores no grid), "
+        "units of the stored values.",
+    ),
+    "hdf5": (
+        "HDF5 replay",
+        "Replay an HDF5 dataset: dataset path inside the file, column index "
+        "for 2-D data, fs [Hz] (0 = take an fs attribute from the file when "
+        "present), units of the stored values.",
+    ),
+}
 
 
 def _spin(
@@ -180,8 +277,8 @@ class ExcitationBuilder(QWidget):
         self._kind.currentTextChanged.connect(self._on_kind_changed)
 
         common = QFormLayout()
-        common.addRow("Kind", self._kind)
-        common.addRow("Axis", self._axis)
+        common.addRow("Kind", with_help(self._kind, "Kind", _KIND_HELP))
+        common.addRow("Axis", with_help(self._axis, "Axis", _AXIS_HELP))
         self._grid_row_label = QLabel("Sampling")
         grid_row = QHBoxLayout()
         grid_row.addWidget(QLabel("fs [Hz]"))
@@ -189,7 +286,10 @@ class ExcitationBuilder(QWidget):
         grid_row.addWidget(QLabel("dur [s]"))
         grid_row.addWidget(self._duration)
         self._sampling_holder = self._wrap(grid_row)
-        common.addRow(self._grid_row_label, self._sampling_holder)
+        common.addRow(
+            self._grid_row_label,
+            with_help(self._sampling_holder, "Sampling", _SAMPLING_HELP),
+        )
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -210,12 +310,15 @@ class ExcitationBuilder(QWidget):
         self._sine_freq = _spin(0.1, 1.0e5, 200.0, decimals=2, step=10.0)
         self._sine_amp = _spin(1e-3, 200.0, 1.0, decimals=3, step=0.1)
         self._stack.addWidget(
-            self._form([("frequency [Hz]", self._sine_freq), ("amplitude [g]", self._sine_amp)])
+            self._form(
+                [("frequency [Hz]", self._sine_freq), ("amplitude [g]", self._sine_amp)],
+                about="sine",
+            )
         )
 
         # multitone (dynamic components: default 2, add/remove, optional phase)
         self._multitone = _MultitoneForm()
-        self._stack.addWidget(self._multitone)
+        self._stack.addWidget(self._form([("components", self._multitone)], about="multitone"))
 
         # sweep / chirp
         self._sweep_f0 = _spin(0.1, 1.0e5, 20.0, decimals=2, step=10.0)
@@ -230,7 +333,8 @@ class ExcitationBuilder(QWidget):
                     ("f end [Hz]", self._sweep_f1),
                     ("amplitude [g]", self._sweep_amp),
                     ("method", self._sweep_method),
-                ]
+                ],
+                about="sweep",
             )
         )
 
@@ -244,7 +348,8 @@ class ExcitationBuilder(QWidget):
                     ("band lo [Hz]", self._rand_lo),
                     ("band hi [Hz]", self._rand_hi),
                     ("g RMS [g]", self._rand_grms),
-                ]
+                ],
+                about="random",
             )
         )
 
@@ -258,7 +363,8 @@ class ExcitationBuilder(QWidget):
                     ("peak [g]", self._shock_peak),
                     ("pulse [ms]", self._shock_pulse),
                     ("delay [s]", self._shock_delay),
-                ]
+                ],
+                about="shock",
             )
         )
 
@@ -282,7 +388,8 @@ class ExcitationBuilder(QWidget):
                     ("column", self._csv_column),
                     ("fs [Hz]", self._csv_fs),
                     ("units", self._csv_units),
-                ]
+                ],
+                about="csv",
             )
         )
 
@@ -302,7 +409,8 @@ class ExcitationBuilder(QWidget):
                     ("path", self._wrap(wav_row)),
                     ("channel", self._wav_channel),
                     ("full scale [g]", self._wav_fs_g),
-                ]
+                ],
+                about="wav",
             )
         )
 
@@ -328,7 +436,8 @@ class ExcitationBuilder(QWidget):
                     ("channel", self._tdms_channel),
                     ("fs [Hz] (0=file)", self._tdms_fs),
                     ("units", self._tdms_units),
-                ]
+                ],
+                about="tdms",
             )
         )
 
@@ -351,7 +460,8 @@ class ExcitationBuilder(QWidget):
                     ("dataset index", self._uff_index),
                     ("fs [Hz] (0=file)", self._uff_fs),
                     ("units", self._uff_units),
-                ]
+                ],
+                about="uff",
             )
         )
 
@@ -377,7 +487,8 @@ class ExcitationBuilder(QWidget):
                     ("column", self._mat_column),
                     ("fs [Hz]", self._mat_fs),
                     ("units", self._mat_units),
-                ]
+                ],
+                about="mat",
             )
         )
 
@@ -403,15 +514,30 @@ class ExcitationBuilder(QWidget):
                     ("column", self._hdf5_column),
                     ("fs [Hz]", self._hdf5_fs),
                     ("units", self._hdf5_units),
-                ]
+                ],
+                about="hdf5",
             )
         )
 
     @staticmethod
-    def _form(rows: list[tuple[str, QWidget]]) -> QWidget:
-        """Build a form-layout page from (label, widget) rows."""
+    def _form(rows: list[tuple[str, QWidget]], about: str | None = None) -> QWidget:
+        """Build a form-layout page from (label, widget) rows.
+
+        Parameters
+        ----------
+        rows : list
+            ``(label, widget)`` pairs.
+        about : str or None, optional
+            Excitation kind key; when given, a summary row with the page's
+            reference note (``?``) is placed on top.
+        """
         page = QWidget()
         form = QFormLayout(page)
+        if about is not None:
+            summary, text = _ABOUT[about]
+            note = QLabel(summary)
+            note.setStyleSheet("color: #808080; font-style: italic;")
+            form.addRow("about", with_help(note, f"{about} excitation", text))
         for label, widget in rows:
             form.addRow(label, widget)
         return page

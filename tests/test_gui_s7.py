@@ -391,3 +391,191 @@ def test_live_nea_panel_draws_thermal_branch(qtbot) -> None:
     live.show_nea(nea)
     names = {item.name() for item in live._p_nea.listDataItems() if item.name() is not None}
     assert {"shot", "rin", "johnson", "thermal"} <= names
+
+
+# --------------------------------------------------------------------------- #
+# S-13b GUI polish: tabbed panel, reseed clears stale overrides, measured-data
+# loaders on their tabs, inline help, and the mouse-wheel guard.
+# --------------------------------------------------------------------------- #
+def test_parameter_panel_is_one_flat_tab_set(qtbot) -> None:
+    """The parameter area is a single tab widget with the nine agreed tabs."""
+    from PySide6.QtWidgets import QTabWidget
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    panel = window.control_panel.system
+    assert isinstance(panel, QTabWidget)
+    labels = [panel.tabText(i) for i in range(panel.count())]
+    assert labels == [
+        "System",
+        "Source",
+        "Fiber line",
+        "Cantilever",
+        "Reflector",
+        "Detector",
+        "Excitation",
+        "Physics layers",
+        "Reproducibility",
+    ]
+
+
+def test_reseed_clears_fields_absent_from_the_new_preset(qtbot) -> None:
+    """Switching presets/compositions clears stale values (no silent overrides).
+
+    A linewidth typed for one SLD must not survive a switch to a preset that
+    has none -- it would silently become an override of the new preset. The
+    same applies to switching the starting composition.
+    """
+    window = MainWindow()
+    qtbot.addWidget(window)
+    source = window.control_panel.system._source
+    # Starting composition B already uses the bare ``sld`` preset, so switch to
+    # a genuinely different preset first: ``sld_dl60`` states the linewidth and
+    # derives (omits) the RIN, so the field follows the preset and RIN clears.
+    source._preset.setCurrentText("sld_dl60")
+    assert source._edits["linewidth_fwhm_m"].text() != ""
+    assert source._edits["rin_db_hz"].text() == ""
+    # Now switch to ``sld``: it has no linewidth, so the stale value must clear
+    # rather than silently become an override; its RIN is stated (-126).
+    source._preset.setCurrentText("sld")
+    assert source._edits["linewidth_fwhm_m"].text() == ""
+    assert "linewidth_fwhm_m" not in source.overrides()
+    assert float(source._edits["rin_db_hz"].text()) == pytest.approx(-126.0)
+    # Switching the starting composition reseeds too: A also uses ``sld``.
+    source._edits["linewidth_fwhm_m"].setText("9e-8")
+    window.control_panel.system._starting.setCurrentText("A")
+    assert source._edits["linewidth_fwhm_m"].text() == ""
+
+
+def _artifact(directory: Path, kind: str) -> Path:
+    """Write one synthetic characterization artifact; return the CSV path."""
+    import math
+
+    import numpy as np
+    import yaml
+
+    if kind == "rin_psd":
+        freq = np.linspace(100.0, 20_000.0, 100)
+        np.savetxt(
+            directory / "a.csv",
+            np.column_stack([freq, np.full_like(freq, -121.5)]),
+            delimiter=",",
+        )
+        body = {
+            "kind": "rin_psd",
+            "instrument": "ESA",
+            "timestamp": "t",
+            "data_file": "a.csv",
+            "columns": {"x": {"name": "f", "unit": "hz"}, "y": {"name": "r", "unit": "db/hz"}},
+            "band": {"f_min_hz": 1_000.0, "f_max_hz": 10_000.0},
+            "uncertainties": {"rin_db_hz": 0.5},
+        }
+    elif kind == "profile":
+        radius = 150.0e-6
+        theta = np.linspace(-0.5, 0.5, 40)
+        table = np.column_stack(
+            [radius * np.sin(theta) * 1e6, radius * (1.0 - np.cos(theta)) * 1e6]
+        )
+        np.savetxt(directory / "a.csv", table, delimiter=",")
+        body = {
+            "kind": "profile",
+            "instrument": "microscope",
+            "timestamp": "t",
+            "data_file": "a.csv",
+            "columns": {"x": {"name": "x", "unit": "um"}, "y": {"name": "z", "unit": "um"}},
+        }
+    else:  # ringdown
+        fs, f1, q = 200_000.0, 6250.0, 1661.0
+        t = np.arange(0.0, 0.2, 1.0 / fs)
+        y = np.exp(-math.pi * f1 / q * t) * np.cos(2.0 * math.pi * f1 * t)
+        np.savetxt(directory / "a.csv", np.column_stack([t, y]), delimiter=",")
+        body = {
+            "kind": "ringdown",
+            "instrument": "scope",
+            "timestamp": "t",
+            "data_file": "a.csv",
+            "columns": {"x": {"name": "t", "unit": "s"}, "y": {"name": "a", "unit": "arb"}},
+        }
+    (directory / "a.yaml").write_text(yaml.safe_dump(body), encoding="utf-8")
+    return directory / "a.csv"
+
+
+def test_rin_trace_loader_seeds_the_rin_field(qtbot, tmp_path: Path) -> None:
+    """Loading a RIN artifact (by its CSV) seeds the explicit RIN value (R-57v)."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+    source = window.control_panel.system._source
+    source.load_rin_artifact(_artifact(tmp_path, "rin_psd"))
+    assert float(source._edits["rin_db_hz"].text()) == pytest.approx(-121.5)
+    assert "replaces the derived floor" in source._rin_note.text()
+
+
+def test_profile_loader_seeds_the_curvature_field(qtbot, tmp_path: Path) -> None:
+    """Loading a tip-profile artifact seeds R_c from the circle fit (M-17)."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+    reflector = window.control_panel.system._reflector
+    reflector.load_profile_artifact(_artifact(tmp_path, "profile"))
+    assert float(reflector._rc.text()) == pytest.approx(150.0e-6, rel=0.01)
+    assert "one azimuth" in reflector._profile_note.text()
+
+
+def test_ringdown_loader_seeds_the_q_override(qtbot, tmp_path: Path) -> None:
+    """Loading a ring-down artifact seeds the Q override (measured Q wins)."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+    panel = window.control_panel.system
+    panel.load_ringdown_artifact(_artifact(tmp_path, "ringdown"))
+    assert float(panel._q_total.text()) == pytest.approx(1661.0, rel=0.02)
+    assert "overrides the Q(L) model" in panel._q_note.text()
+    assert panel.system_payload()["q_total"] == pytest.approx(1661.0, rel=0.02)
+
+
+def test_loader_rejects_wrong_artifact_kind(qtbot, tmp_path: Path) -> None:
+    """A wrong-kind artifact is refused loudly by each loader."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+    ringdown_csv = _artifact(tmp_path, "ringdown")
+    with pytest.raises(ValueError, match="not a RIN trace"):
+        window.control_panel.system._source.load_rin_artifact(ringdown_csv)
+    with pytest.raises(ValueError, match="not a tip profile"):
+        window.control_panel.system._reflector.load_profile_artifact(ringdown_csv)
+
+
+def test_every_tab_carries_inline_help(qtbot) -> None:
+    """Each parameter tab exposes the faint ``?`` reference buttons."""
+    from PySide6.QtWidgets import QToolButton
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    panel = window.control_panel.system
+    for index in range(panel.count()):
+        page = panel.widget(index)
+        marks = [b for b in page.findChildren(QToolButton) if b.text() == "?"]
+        assert marks, f"tab {panel.tabText(index)!r} has no help buttons"
+
+
+def test_wheel_cannot_edit_combos_or_spins(qtbot) -> None:
+    """The mouse wheel never changes a combo/spin value (S-13b §4 guard)."""
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtGui import QWheelEvent
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    combo = window.control_panel.system._starting
+    spin = window.control_panel._seed
+    wheel = QWheelEvent(
+        QPointF(5.0, 5.0),
+        QPointF(5.0, 5.0),
+        QPoint(0, 0),
+        QPoint(0, 120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.NoScrollPhase,
+        False,
+    )
+    combo_before, spin_before = combo.currentIndex(), spin.value()
+    QApplication.sendEvent(combo, wheel)
+    QApplication.sendEvent(spin, wheel)
+    assert combo.currentIndex() == combo_before
+    assert spin.value() == spin_before

@@ -1,21 +1,28 @@
-"""Control panel widget: composition, excitation, stage toggles, seed.
+"""Control panel widget: one flat tab set of composition, excitation, stages.
 
 Gathers the buyer-facing controls. Since task S7-mod the sensor is described by
 an **editable composition** (:class:`~optivibe.gui.widgets.subsystem_forms.SystemBuilderPanel`,
 one form per subsystem with presets and overrides) rather than a single A/B/C/D
-combo; the A/B/C/D variants survive as *starting compositions*. The rest is as
-before -- build an excitation and flip the physics layers -- but those toggles
-now select only the **stage implementation** (physical vs ``stub``): optics
-``physical (reflector)`` / ``stub`` (the key stays ``cylinder``; the reflector
-*shape* is chosen in the composition's Reflector form), mechanics, the detector
-(``photodiode`` / ``stub``), the DSP (``standard`` / ``stub``) with its
-sensitivity model and integrator, plus a seed. The physical *parameters* live in
-the composition forms; in particular the detector's ``balanced`` / reference-arm
-settings live solely in the Detector form (``variant.detector``), so the scenario
-emits **no** detector override -- one source of truth (S7-mod cleanup). The
-controls assemble a scenario *payload* for
-:func:`optivibe.gui.controllers.scenario_builder.build_scenario_config` and a
-composition payload for
+combo; the A/B/C/D variants survive as *starting compositions*. Since the S-13b
+polish the parameter area is a single :class:`QTabWidget`: the composition panel
+provides the *System* + subsystem tabs and this widget appends the *Excitation*,
+*Physics layers* and *Reproducibility* pages -- the previous one-column stack was
+overloaded. Every row carries a faint ``?`` reference note
+(:func:`~optivibe.gui.widgets.ui_helpers.with_help`), and the mouse wheel is
+guarded app-wide so skimming the panel can never silently edit a combo or spin
+box (:func:`~optivibe.gui.widgets.ui_helpers.install_wheel_guard`).
+
+The "Physics layers" toggles select only the **stage implementation** (physical
+vs ``stub``): optics ``physical (reflector)`` / ``stub`` (the key stays
+``cylinder``; the reflector *shape* is chosen in the composition's Reflector
+tab), mechanics, the detector (``photodiode`` / ``stub``), the DSP
+(``standard`` / ``stub``) with its sensitivity model and integrator, plus a
+seed. The physical *parameters* live in the composition tabs; in particular the
+detector's ``balanced`` / reference-arm settings live solely in the Detector tab
+(``variant.detector``), so the scenario emits **no** detector override -- one
+source of truth (S7-mod cleanup). The controls assemble a scenario *payload*
+for :func:`optivibe.gui.controllers.scenario_builder.build_scenario_config` and
+a composition payload for
 :func:`optivibe.gui.controllers.system_builder.build_system_config`. No physics
 here: every value flows into the existing config models (09 §9).
 """
@@ -37,8 +44,57 @@ from PySide6.QtWidgets import (
 
 from optivibe.gui.widgets.excitation_builder import ExcitationBuilder
 from optivibe.gui.widgets.subsystem_forms import SystemBuilderPanel
+from optivibe.gui.widgets.ui_helpers import install_wheel_guard, with_help
 
 __all__ = ["ControlPanel"]
+
+_OPTICS_HELP = (
+    "Optics stage implementation: 'physical (reflector)' -- the shape-"
+    "dispatching Gaussian-coupling model (the shape itself is chosen on the "
+    "Reflector tab); 'stub' -- a linear eta working-point toy (the eta_bias "
+    "scalar on the System tab) for plumbing checks. Physical is the default "
+    "for any real study."
+)
+_MECHANICS_HELP = (
+    "Mechanics stage implementation: 'modal' -- frequency-domain modal "
+    "response of the cantilever (fast, the standard path); 'modal_time' -- "
+    "time-domain integration of the same modal model (for shocks/transients); "
+    "'stub' -- pass-through for plumbing checks."
+)
+_DETECTOR_HELP = (
+    "Detector stage implementation: 'photodiode' -- the physical photocurrent "
+    "model with shot/RIN/Johnson/ADC noise (enables the NEA budget); 'stub' "
+    "-- noiseless pass-through (NEA panels show 'not available')."
+)
+_DSP_HELP = (
+    "Inverse-chain (DSP) implementation: 'standard' -- the calibrated "
+    "detector-current -> acceleration chain with spectra and metrics; 'stub' "
+    "-- a scale-only shortcut for plumbing checks. The sensitivity and "
+    "integrator selectors below apply to the standard DSP only."
+)
+_SENSITIVITY_HELP = (
+    "How the standard DSP obtains the scalar sensitivity s_target: 'static' "
+    "-- the design-point derivative; 'operating_point' -- re-evaluated at the "
+    "resolved working point (bias, gap); 'nonlinear_curve' -- inverted "
+    "through the full eta(x) curve (handles large drive amplitudes)."
+)
+_INTEGRATOR_HELP = (
+    "Acceleration -> velocity/displacement integration: 'frequency' -- "
+    "division by (i omega) in the spectrum (fast, exact for stationary "
+    "signals); 'time' -- time-domain integration with detrending (better for "
+    "transients/shocks)."
+)
+_SEED_ENABLED_HELP = (
+    "Fix the random seed of the noise and random-excitation generators. "
+    "Checked: every Run with the same settings is bit-reproducible. "
+    "Unchecked: each Run draws fresh noise (for eyeballing run-to-run "
+    "spread)."
+)
+_SEED_HELP = (
+    "The seed value used when 'fixed seed' is checked. Any integer; keep it "
+    "constant to reproduce a run exactly, change it to draw a different "
+    "noise realisation."
+)
 
 
 class ControlPanel(QWidget):
@@ -78,13 +134,18 @@ class ControlPanel(QWidget):
 
         self._dsp.currentTextChanged.connect(self._on_dsp_changed)
 
+        # One flat tab set: the composition panel's tabs + our three pages.
+        self._system.addTab(self._excitation_page(), "Excitation")
+        self._system.addTab(self._stages_page(), "Physics layers")
+        self._system.addTab(self._run_page(), "Reproducibility")
+
         layout = QVBoxLayout(self)
-        layout.addWidget(self._composition_group())
-        layout.addWidget(self._excitation_group())
-        layout.addWidget(self._stages_group())
-        layout.addWidget(self._run_group())
-        layout.addStretch(1)
+        layout.addWidget(self._system)
         self._on_dsp_changed(self._dsp.currentText())
+
+        # No silent wheel edits anywhere in the app (S-13b §4): the wheel over
+        # a combo/spin box scrolls the panel instead of changing the value.
+        install_wheel_guard()
 
     @staticmethod
     def _combo(items: tuple[str, ...]) -> QComboBox:
@@ -101,35 +162,43 @@ class ControlPanel(QWidget):
             box.addItem(label, data)
         return box
 
-    def _composition_group(self) -> QGroupBox:
-        group = QGroupBox("Sensor composition")
-        layout = QVBoxLayout(group)
-        layout.addWidget(self._system)
-        return group
-
-    def _excitation_group(self) -> QGroupBox:
+    def _excitation_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
         group = QGroupBox("Excitation")
-        layout = QVBoxLayout(group)
-        layout.addWidget(self._excitation)
-        return group
+        inner = QVBoxLayout(group)
+        inner.addWidget(self._excitation)
+        layout.addWidget(group)
+        layout.addStretch(1)
+        return page
 
-    def _stages_group(self) -> QGroupBox:
+    def _stages_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
         group = QGroupBox("Physics layers (stage implementation)")
         form = QFormLayout(group)
-        form.addRow("Optics", self._optics)
-        form.addRow("Mechanics", self._mechanics)
-        form.addRow("Detector", self._detector)
-        form.addRow("DSP", self._dsp)
-        form.addRow("Sensitivity", self._sensitivity)
-        form.addRow("Integrator", self._integrator)
-        return group
+        form.addRow("Optics", with_help(self._optics, "Optics stage", _OPTICS_HELP))
+        form.addRow("Mechanics", with_help(self._mechanics, "Mechanics stage", _MECHANICS_HELP))
+        form.addRow("Detector", with_help(self._detector, "Detector stage", _DETECTOR_HELP))
+        form.addRow("DSP", with_help(self._dsp, "DSP stage", _DSP_HELP))
+        form.addRow(
+            "Sensitivity", with_help(self._sensitivity, "Sensitivity model", _SENSITIVITY_HELP)
+        )
+        form.addRow("Integrator", with_help(self._integrator, "Integrator", _INTEGRATOR_HELP))
+        layout.addWidget(group)
+        layout.addStretch(1)
+        return page
 
-    def _run_group(self) -> QGroupBox:
+    def _run_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
         group = QGroupBox("Reproducibility")
         form = QFormLayout(group)
-        form.addRow(self._seed_enabled)
-        form.addRow("Seed", self._seed)
-        return group
+        form.addRow(with_help(self._seed_enabled, "fixed seed", _SEED_ENABLED_HELP))
+        form.addRow("Seed", with_help(self._seed, "Seed", _SEED_HELP))
+        layout.addWidget(group)
+        layout.addStretch(1)
+        return page
 
     def _on_dsp_changed(self, key: str) -> None:
         """Enable sensitivity / integrator controls only for the standard DSP."""

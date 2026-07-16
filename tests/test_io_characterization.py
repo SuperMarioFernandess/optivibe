@@ -33,6 +33,7 @@ from optivibe.io.characterization import (
     CHARACTERIZATION_REGISTRY,
     MeasuredParameter,
     load_characterization,
+    resolve_sidecar_path,
 )
 
 C0 = 299_792_458.0
@@ -456,3 +457,66 @@ def test_measured_parameter_rejects_negative_u() -> None:
     """The contract enforces u >= 0 (GUM, 17 §4)."""
     with pytest.raises(ValueError, match="u"):
         MeasuredParameter(name="length_m", value=1.0, u=-0.1)
+
+
+# --------------------------------------------------------------------------- #
+# resolve_sidecar_path: the GUI loaders accept the sidecar YAML OR its CSV
+# (same-stem convention, doc 16 §2a).
+# --------------------------------------------------------------------------- #
+def test_resolve_sidecar_path_passes_yaml_through(tmp_path: Path) -> None:
+    """A sidecar YAML/YML path is returned unchanged."""
+    yaml_path = tmp_path / "a.yaml"
+    yaml_path.write_text("kind: scalar\n", encoding="utf-8")
+    assert resolve_sidecar_path(yaml_path) == yaml_path
+    yml_path = tmp_path / "b.yml"
+    yml_path.write_text("kind: scalar\n", encoding="utf-8")
+    assert resolve_sidecar_path(yml_path) == yml_path
+
+
+def test_resolve_sidecar_path_hops_from_csv_to_sidecar(tmp_path: Path) -> None:
+    """A CSV path resolves to the same-stem sidecar next to it."""
+    (tmp_path / "trace.csv").write_text("1,2\n", encoding="utf-8")
+    sidecar = tmp_path / "trace.yaml"
+    sidecar.write_text("kind: rin_psd\n", encoding="utf-8")
+    assert resolve_sidecar_path(tmp_path / "trace.csv") == sidecar
+
+
+def test_resolve_sidecar_path_csv_without_sidecar_raises(tmp_path: Path) -> None:
+    """A CSV with no same-stem sidecar fails loudly (units are undeclared)."""
+    (tmp_path / "orphan.csv").write_text("1,2\n", encoding="utf-8")
+    with pytest.raises(FileNotFoundError, match="no sidecar found"):
+        resolve_sidecar_path(tmp_path / "orphan.csv")
+
+
+def test_resolve_sidecar_path_unknown_extension_raises(tmp_path: Path) -> None:
+    """An unrecognised extension is rejected."""
+    with pytest.raises(ValueError, match="unrecognised artifact"):
+        resolve_sidecar_path(tmp_path / "trace.txt")
+
+
+def test_load_characterization_accepts_csv_entry(tmp_path: Path) -> None:
+    """End-to-end: picking the CSV loads the artifact via its sidecar."""
+    freq = np.linspace(100.0, 20_000.0, 100)
+    np.savetxt(
+        tmp_path / "rin.csv",
+        np.column_stack([freq, np.full_like(freq, -121.5)]),
+        delimiter=",",
+    )
+    _sidecar(
+        tmp_path,
+        "rin.yaml",
+        {
+            "kind": "rin_psd",
+            "instrument": "ESA",
+            "timestamp": "t",
+            "data_file": "rin.csv",
+            "columns": {
+                "x": {"name": "f", "unit": "hz"},
+                "y": {"name": "r", "unit": "db/hz"},
+            },
+            "band": {"f_min_hz": 1_000.0, "f_max_hz": 10_000.0},
+            "uncertainties": {"rin_db_hz": 0.5},
+        },
+    )
+    result = load_characterization(tmp_path / "rin.csv")
+    assert result.get("rin_db_hz").value == pytest.approx(-121.5)
