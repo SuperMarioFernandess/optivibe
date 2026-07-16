@@ -34,6 +34,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     configure_logging()
     app = QApplication(list(argv) if argv is not None else sys.argv)
+    app.setOrganizationName("OptiVibe")
+    app.setApplicationName("OptiVibe")
     window = MainWindow()
     window.show()
     return int(app.exec())

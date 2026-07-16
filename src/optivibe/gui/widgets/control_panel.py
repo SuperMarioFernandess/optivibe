@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from optivibe.gui.i18n import t
 from optivibe.gui.widgets.excitation_builder import ExcitationBuilder
 from optivibe.gui.widgets.subsystem_forms import SystemBuilderPanel
 from optivibe.gui.widgets.ui_helpers import install_wheel_guard, with_help
@@ -126,7 +127,7 @@ class ControlPanel(QWidget):
         self._sensitivity = self._combo(("static", "operating_point", "nonlinear_curve"))
         self._integrator = self._combo(("frequency", "time"))
 
-        self._seed_enabled = QCheckBox("fixed seed")
+        self._seed_enabled = QCheckBox(t("fixed seed"))
         self._seed_enabled.setChecked(True)
         self._seed = QSpinBox()
         self._seed.setRange(0, 2_000_000_000)
@@ -135,9 +136,9 @@ class ControlPanel(QWidget):
         self._dsp.currentTextChanged.connect(self._on_dsp_changed)
 
         # One flat tab set: the composition panel's tabs + our three pages.
-        self._system.addTab(self._excitation_page(), "Excitation")
-        self._system.addTab(self._stages_page(), "Physics layers")
-        self._system.addTab(self._run_page(), "Reproducibility")
+        self._system.addTab(self._excitation_page(), t("Excitation"))
+        self._system.addTab(self._stages_page(), t("Physics layers"))
+        self._system.addTab(self._run_page(), t("Reproducibility"))
 
         layout = QVBoxLayout(self)
         layout.addWidget(self._system)
@@ -165,7 +166,7 @@ class ControlPanel(QWidget):
     def _excitation_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        group = QGroupBox("Excitation")
+        group = QGroupBox(t("Excitation"))
         inner = QVBoxLayout(group)
         inner.addWidget(self._excitation)
         layout.addWidget(group)
@@ -175,16 +176,16 @@ class ControlPanel(QWidget):
     def _stages_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        group = QGroupBox("Physics layers (stage implementation)")
+        group = QGroupBox(t("Physics layers (stage implementation)"))
         form = QFormLayout(group)
-        form.addRow("Optics", with_help(self._optics, "Optics stage", _OPTICS_HELP))
-        form.addRow("Mechanics", with_help(self._mechanics, "Mechanics stage", _MECHANICS_HELP))
-        form.addRow("Detector", with_help(self._detector, "Detector stage", _DETECTOR_HELP))
-        form.addRow("DSP", with_help(self._dsp, "DSP stage", _DSP_HELP))
+        form.addRow(t("Optics"), with_help(self._optics, "Optics stage", _OPTICS_HELP))
+        form.addRow(t("Mechanics"), with_help(self._mechanics, "Mechanics stage", _MECHANICS_HELP))
+        form.addRow(t("Detector"), with_help(self._detector, "Detector stage", _DETECTOR_HELP))
+        form.addRow(t("DSP"), with_help(self._dsp, "DSP stage", _DSP_HELP))
         form.addRow(
             "Sensitivity", with_help(self._sensitivity, "Sensitivity model", _SENSITIVITY_HELP)
         )
-        form.addRow("Integrator", with_help(self._integrator, "Integrator", _INTEGRATOR_HELP))
+        form.addRow(t("Integrator"), with_help(self._integrator, "Integrator", _INTEGRATOR_HELP))
         layout.addWidget(group)
         layout.addStretch(1)
         return page
@@ -192,10 +193,10 @@ class ControlPanel(QWidget):
     def _run_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        group = QGroupBox("Reproducibility")
+        group = QGroupBox(t("Reproducibility"))
         form = QFormLayout(group)
         form.addRow(with_help(self._seed_enabled, "fixed seed", _SEED_ENABLED_HELP))
-        form.addRow("Seed", with_help(self._seed, "Seed", _SEED_HELP))
+        form.addRow(t("Seed"), with_help(self._seed, "Seed", _SEED_HELP))
         layout.addWidget(group)
         layout.addStretch(1)
         return page
@@ -256,3 +257,43 @@ class ControlPanel(QWidget):
             },
             "seed": self._seed.value() if self._seed_enabled.isChecked() else None,
         }
+
+    def restore_scenario(self, payload: dict[str, Any]) -> None:
+        """Restore stage selections, seed and excitation from a scenario payload.
+
+        The inverse of :meth:`scenario_payload`, used to preserve state across a
+        language rebuild (SW-65). Missing fields keep their built defaults.
+        """
+        stages = payload.get("stages", {})
+        if "mechanics" in stages:
+            self._mechanics.setCurrentText(str(stages["mechanics"]))
+        if "detector" in stages:
+            self._detector.setCurrentText(str(stages["detector"]))
+        if "dsp" in stages:
+            self._dsp.setCurrentText(str(stages["dsp"]))
+        if "optics" in stages:
+            index = self._optics.findData(str(stages["optics"]))
+            if index >= 0:
+                self._optics.setCurrentIndex(index)
+        dsp = payload.get("dsp", {})
+        if "sensitivity_model" in dsp:
+            self._sensitivity.setCurrentText(str(dsp["sensitivity_model"]))
+        if "integrator" in dsp:
+            self._integrator.setCurrentText(str(dsp["integrator"]))
+        seed = payload.get("seed")
+        self._seed_enabled.setChecked(seed is not None)
+        if seed is not None:
+            self._seed.setValue(int(seed))
+        excitation = payload.get("excitation")
+        if isinstance(excitation, dict):
+            self._excitation.load_payload(excitation)
+
+    def apply_system_payload(self, payload: dict[str, Any]) -> None:
+        """Restore the composition tabs from a :meth:`system_payload` mapping.
+
+        Round-trips the payload through ``build_system_config`` (validation) and
+        repopulates every subsystem form -- used by the language rebuild (SW-65).
+        """
+        from optivibe.gui.controllers.system_builder import build_system_config
+
+        self._system._apply_system(build_system_config(payload))

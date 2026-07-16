@@ -59,6 +59,7 @@ from optivibe.gui.controllers.system_builder import (
     build_system_config,
     subsystem_defaults,
 )
+from optivibe.gui.i18n import t, tr
 from optivibe.gui.widgets.ui_helpers import with_help
 
 logger = get_logger(__name__)
@@ -390,7 +391,7 @@ class _SubsystemForm(QGroupBox):
         fields: tuple[_FieldSpec, ...],
         store: PresetStore,
     ) -> None:
-        super().__init__(title)
+        super().__init__(t(title))
         self._subsystem = subsystem
         self._fields = fields
         self._store = store
@@ -401,12 +402,13 @@ class _SubsystemForm(QGroupBox):
         self._preset.currentTextChanged.connect(self._on_preset_changed)
 
         self._form = QFormLayout(self)
-        self._form.addRow("preset", with_help(self._preset, f"{title}: preset", _PRESET_HELP))
+        self._form.addRow(t("preset"), with_help(self._preset, f"{title}: preset", _PRESET_HELP))
         for key, label, unit, tip, help_text in fields:
             edit = _line()
-            edit.setToolTip(tip)
+            edit.setToolTip(t(tip))
             self._edits[key] = edit
-            self._form.addRow(f"{label} [{unit}]", with_help(edit, f"{label} [{unit}]", help_text))
+            row = f"{t(label)} [{unit}]"
+            self._form.addRow(row, with_help(edit, row, help_text))
 
     def _reload_presets(self) -> None:
         """Refresh the preset list (user presets may have appeared)."""
@@ -505,9 +507,9 @@ class _SourceForm(_SubsystemForm):
         )
         self._spectrum_lam: list[float] | None = None
         self._spectrum_psd: list[float] | None = None
-        self._spectrum_note = QLabel("no measured spectrum loaded")
+        self._spectrum_note = QLabel(t("no measured spectrum loaded"))
         self._spectrum_note.setWordWrap(True)
-        self._spectrum_button = QPushButton("Load measured spectrum...")
+        self._spectrum_button = QPushButton(t("Load measured spectrum..."))
         self._spectrum_button.setToolTip(
             "Load a characterization artifact (sidecar YAML or its CSV; doc 16 "
             "§2a) and enable lineshape = measured"
@@ -515,7 +517,7 @@ class _SourceForm(_SubsystemForm):
         self._spectrum_button.clicked.connect(self._on_load_spectrum)
         self._rin_note = QLabel("")
         self._rin_note.setWordWrap(True)
-        self._rin_button = QPushButton("Load RIN trace...")
+        self._rin_button = QPushButton(t("Load RIN trace..."))
         self._rin_button.setToolTip(
             "Load a floor-corrected RIN(f) artifact (M-16); the band median "
             "seeds the RIN field as an explicit value (replaces the derived "
@@ -604,8 +606,13 @@ class _SourceForm(_SubsystemForm):
         self._set_spectrum(
             list(result.spectrum_wavelength_m),
             list(result.spectrum_psd),
-            note=f"{result.provenance.data_file} ({result.provenance.instrument}, "
-            f"{result.provenance.timestamp}; sha {str(result.provenance.sha256)[:8]})",
+            note=tr(
+                "source.spectrum.note",
+                file=result.provenance.data_file,
+                instrument=result.provenance.instrument,
+                timestamp=result.provenance.timestamp,
+                sha=str(result.provenance.sha256)[:8],
+            ),
         )
         centroid = result.get("wavelength_m")
         if centroid is not None:
@@ -624,7 +631,7 @@ class _SourceForm(_SubsystemForm):
         """Drop the attached table (preset change / non-measured composition)."""
         self._spectrum_lam = None
         self._spectrum_psd = None
-        self._spectrum_note.setText("no measured spectrum loaded")
+        self._spectrum_note.setText(tr("source.spectrum.none"))
         self._set_measured_enabled(False)
         if self._lineshape.currentText() == "measured":
             self._lineshape.setCurrentText("(default)")
@@ -669,9 +676,13 @@ class _SourceForm(_SubsystemForm):
             raise ValueError(msg)
         self._edits["rin_db_hz"].setText(_fmt(rin.value))
         self._rin_note.setText(
-            f"measured RIN {rin.value:.2f} dB/Hz (u = {rin.u:.2g}; "
-            f"{result.provenance.data_file}, {result.provenance.instrument}) -- "
-            "replaces the derived floor (R-57v)"
+            tr(
+                "source.rin_trace.note",
+                value=rin.value,
+                u=rin.u,
+                file=result.provenance.data_file,
+                instrument=result.provenance.instrument,
+            )
         )
 
     # ------------------------------------------------------------------ #
@@ -690,7 +701,7 @@ class _SourceForm(_SubsystemForm):
         lam = values.get("spectrum_wavelength_m")
         psd = values.get("spectrum_psd")
         if lam and psd:
-            self._set_spectrum(list(lam), list(psd), note="from the composition overrides")
+            self._set_spectrum(list(lam), list(psd), note=tr("source.spectrum.from_overrides"))
         else:
             self._clear_spectrum()
         shape = values.get("lineshape")
@@ -735,13 +746,13 @@ class _ReflectorForm(_SubsystemForm):
         self._alpha.setToolTip("Wedge face-tilt angle alpha_w (wedge only; doc 03 §c)")
         self._profile_note = QLabel("")
         self._profile_note.setWordWrap(True)
-        self._profile_button = QPushButton("Load tip profile (R_c)...")
+        self._profile_button = QPushButton(t("Load tip profile (R_c)..."))
         self._profile_button.setToolTip(
             "Load a tip-contour artifact (M-17); the circle fit seeds R_c"
         )
         self._profile_button.clicked.connect(self._on_load_profile)
 
-        self._form.insertRow(1, "shape", with_help(self._shape, "shape", _SHAPE_HELP))
+        self._form.insertRow(1, t("shape"), with_help(self._shape, "shape", _SHAPE_HELP))
         self._form.insertRow(
             2, "curvature R_c [m]", with_help(self._rc, "curvature R_c [m]", _RC_HELP)
         )
@@ -754,7 +765,7 @@ class _ReflectorForm(_SubsystemForm):
         profile_row.addWidget(self._profile_note, stretch=1)
         holder = QWidget()
         holder.setLayout(profile_row)
-        self._form.addRow("profile", with_help(holder, "Load tip profile", _PROFILE_LOAD_HELP))
+        self._form.addRow(t("profile"), with_help(holder, "Load tip profile", _PROFILE_LOAD_HELP))
 
         self._shape.currentTextChanged.connect(self._on_shape_changed)
         self._on_shape_changed(self._shape.currentText())
@@ -801,9 +812,13 @@ class _ReflectorForm(_SubsystemForm):
             raise ValueError(msg)
         self._rc.setText(_fmt(r_c.value))
         self._profile_note.setText(
-            f"measured R_c {r_c.value * 1e6:.2f} um (u = {(r_c.u or 0.0) * 1e6:.2g} um; "
-            f"{result.provenance.data_file}, {result.provenance.instrument}; one azimuth "
-            "-- astigmatism = backlog M-03)"
+            tr(
+                "reflector.profile.note",
+                rc=r_c.value * 1e6,
+                u=(r_c.u or 0.0) * 1e6,
+                file=result.provenance.data_file,
+                instrument=result.provenance.instrument,
+            )
         )
 
     def _reseed(self, preset: str, overrides: dict[str, Any]) -> None:
@@ -955,21 +970,21 @@ class SystemBuilderPanel(QTabWidget):
             "quantity (Q(L) damping model, R-47/R-48): leave blank to use the "
             "model value shown below; a typed value is an explicit override"
         )
-        self._q_model = QLabel("Q(L) model: -")
+        self._q_model = QLabel(t("Q(L) model: -"))
         self._q_model.setToolTip(
             "What a blank Q field resolves to: the Q(L) damping model at the "
             "current cantilever length and vacuum flag (M-02)"
         )
         self._q_note = QLabel("")
         self._q_note.setWordWrap(True)
-        self._ringdown_button = QPushButton("Load ring-down (Q)...")
+        self._ringdown_button = QPushButton(t("Load ring-down (Q)..."))
         self._ringdown_button.setToolTip(
             "Load a free-decay artifact (M-18); the log-decrement Q seeds the "
             "override field (measured Q wins over the Q(L) model)"
         )
         self._ringdown_button.clicked.connect(self._on_load_ringdown)
         self._target_nea = _line("10.0")
-        self._vacuum = QCheckBox("vacuum")
+        self._vacuum = QCheckBox(t("vacuum"))
         self._mode.currentTextChanged.connect(self._on_mode_changed)
 
         # Subsystem forms.
@@ -980,7 +995,7 @@ class SystemBuilderPanel(QTabWidget):
         )
         self._reflector = _ReflectorForm(self._store)
         self._detector = _SubsystemForm("Detector", "detector", _DETECTOR_FIELDS, self._store)
-        self._balanced = QCheckBox("balanced channel")
+        self._balanced = QCheckBox(t("balanced channel"))
         self._reference_arm = QComboBox()
         self._reference_arm.addItems(("matched", "bright"))
         self._detector._form.addRow(
@@ -1020,8 +1035,8 @@ class SystemBuilderPanel(QTabWidget):
             ),
         )
 
-        self._save_button = QPushButton("Save as...")
-        self._load_button = QPushButton("Load...")
+        self._save_button = QPushButton(t("Save as..."))
+        self._load_button = QPushButton(t("Load..."))
         self._save_button.clicked.connect(self._on_save)
         self._load_button.clicked.connect(self._on_load)
 
@@ -1032,12 +1047,12 @@ class SystemBuilderPanel(QTabWidget):
         self._cantilever._preset.currentTextChanged.connect(lambda _name: self.refresh_q_model())
         self._cantilever._edits["length_m"].editingFinished.connect(self.refresh_q_model)
 
-        self.addTab(self._system_page(), "System")
-        self.addTab(self._page(self._source), "Source")
-        self.addTab(self._page(self._fiber), "Fiber line")
-        self.addTab(self._page(self._cantilever), "Cantilever")
-        self.addTab(self._page(self._reflector), "Reflector")
-        self.addTab(self._page(self._detector), "Detector")
+        self.addTab(self._system_page(), t("System"))
+        self.addTab(self._page(self._source), t("Source"))
+        self.addTab(self._page(self._fiber), t("Fiber line"))
+        self.addTab(self._page(self._cantilever), t("Cantilever"))
+        self.addTab(self._page(self._reflector), t("Reflector"))
+        self.addTab(self._page(self._detector), t("Detector"))
         self.setUsesScrollButtons(True)
 
         self._load_starting("B")
@@ -1053,16 +1068,21 @@ class SystemBuilderPanel(QTabWidget):
 
     def _system_page(self) -> QWidget:
         """Build the *System* tab: composition scalars + Q(L) + save/load."""
-        group = QGroupBox("System / composition")
+        group = QGroupBox(t("System / composition"))
         form = QFormLayout(group)
         form.addRow(
             "starting composition",
             with_help(self._starting, "starting composition", _STARTING_HELP),
         )
-        form.addRow("name", with_help(self._name, "name", _NAME_HELP))
-        form.addRow("description", with_help(self._description, "description", _DESCRIPTION_HELP))
-        form.addRow("mode", with_help(self._mode, "mode", _MODE_HELP))
-        form.addRow("line freq [Hz]", with_help(self._line_freq, "line freq [Hz]", _LINE_FREQ_HELP))
+        form.addRow(t("name"), with_help(self._name, "name", _NAME_HELP))
+        form.addRow(
+            t("description"), with_help(self._description, "description", _DESCRIPTION_HELP)
+        )
+        form.addRow(t("mode"), with_help(self._mode, "mode", _MODE_HELP))
+        form.addRow(
+            t("line freq [Hz]"),
+            with_help(self._line_freq, "line freq [Hz]", _LINE_FREQ_HELP),
+        )
         band_row = QHBoxLayout()
         band_row.addWidget(QLabel("f_min"))
         band_row.addWidget(self._f_min)
@@ -1070,24 +1090,26 @@ class SystemBuilderPanel(QTabWidget):
         band_row.addWidget(self._f_max)
         holder = QWidget()
         holder.setLayout(band_row)
-        form.addRow("band [Hz]", with_help(holder, "band [Hz]", _BAND_HELP))
+        form.addRow(t("band [Hz]"), with_help(holder, "band [Hz]", _BAND_HELP))
         form.addRow(
             "full scale [g]", with_help(self._full_scale, "full scale [g]", _FULL_SCALE_HELP)
         )
-        form.addRow("route", with_help(self._route, "route", _ROUTE_HELP))
-        form.addRow("eta_bias (stub)", with_help(self._eta_bias, "eta_bias (stub)", _ETA_BIAS_HELP))
+        form.addRow(t("route"), with_help(self._route, "route", _ROUTE_HELP))
+        form.addRow(
+            t("eta_bias (stub)"), with_help(self._eta_bias, "eta_bias (stub)", _ETA_BIAS_HELP)
+        )
         form.addRow(
             "Q total override (blank = Q(L) model)",
             with_help(self._q_total, "Q total override", _Q_HELP),
         )
-        form.addRow("", self._q_model)
+        form.addRow(t(""), self._q_model)
         ringdown_row = QHBoxLayout()
         ringdown_row.setContentsMargins(0, 0, 0, 0)
         ringdown_row.addWidget(self._ringdown_button)
         ringdown_row.addWidget(self._q_note, stretch=1)
         rd_holder = QWidget()
         rd_holder.setLayout(ringdown_row)
-        form.addRow("ring-down", with_help(rd_holder, "Load ring-down", _RINGDOWN_LOAD_HELP))
+        form.addRow(t("ring-down"), with_help(rd_holder, "Load ring-down", _RINGDOWN_LOAD_HELP))
         form.addRow(
             "target NEA [ug/rtHz]",
             with_help(self._target_nea, "target NEA [ug/rtHz]", _TARGET_NEA_HELP),
@@ -1152,11 +1174,16 @@ class SystemBuilderPanel(QTabWidget):
             raise ValueError(msg)
         self._q_total.setText(_fmt(q_meas.value))
         f1 = result.get("f1_hz")
-        f1_text = f", f1 = {f1.value:.1f} Hz" if f1 is not None else ""
+        f1_text = tr("system.ringdown.f1", f1=f1.value) if f1 is not None else ""
         self._q_note.setText(
-            f"measured Q {q_meas.value:.1f} (u = {(q_meas.u or 0.0):.2g}{f1_text}; "
-            f"{result.provenance.data_file}, {result.provenance.instrument}) -- "
-            "overrides the Q(L) model"
+            tr(
+                "system.ringdown.note",
+                q=q_meas.value,
+                u=(q_meas.u or 0.0),
+                f1=f1_text,
+                file=result.provenance.data_file,
+                instrument=result.provenance.instrument,
+            )
         )
         self.refresh_q_model()
 
@@ -1222,9 +1249,9 @@ class SystemBuilderPanel(QTabWidget):
             )
         except (ValueError, KeyError, FileNotFoundError) as exc:
             logger.debug("Q(L) hint unavailable: %s", exc)
-            self._q_model.setText("Q(L) model: n/a (check the cantilever fields)")
+            self._q_model.setText(tr("system.q_model.na"))
             return
-        self._q_model.setText(f"Q(L) model: {q_value:.6g} (used when the field above is blank)")
+        self._q_model.setText(tr("system.q_model.value", q=q_value))
 
     def _on_save(self) -> None:  # pragma: no cover - file dialog
         """Save the current composition under ``configs/user/systems``."""

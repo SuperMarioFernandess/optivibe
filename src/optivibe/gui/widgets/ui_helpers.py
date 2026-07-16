@@ -33,6 +33,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from optivibe.gui.i18n import t
+
 __all__ = ["install_wheel_guard", "with_help"]
 
 
@@ -77,7 +79,7 @@ def with_help(widget: QWidget, title: str, text: str) -> QWidget:
     row.setContentsMargins(0, 0, 0, 0)
     row.setSpacing(4)
     row.addWidget(widget, stretch=1)
-    row.addWidget(_help_button(title, text, holder))
+    row.addWidget(_help_button(t(title), t(text), holder))
     return holder
 
 

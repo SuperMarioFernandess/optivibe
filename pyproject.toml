@@ -98,6 +98,11 @@ convention = "numpy"
 "docs/manual/**" = ["D"]
 "docs/manual/figures/*" = ["D", "RUF001"]
 
+# The GUI i18n catalog and its test carry intentional Russian (Cyrillic) UI
+# strings; allow the ambiguous-unicode lint (RUF001/2/3) there (Batch 1, SW-65).
+"src/optivibe/gui/i18n.py" = ["RUF001", "RUF002", "RUF003"]
+"tests/test_gui_i18n.py" = ["D", "RUF001", "RUF002", "RUF003"]
+
 # --------------------------------------------------------------------------- #
 # mypy: strict typing for the library (doc 10 §3). Pydantic plugin enabled.
 # Heavy optional deps without complete stubs are treated as Any on import.

@@ -13,20 +13,30 @@ Report, ``SweepResult`` -> Sweeps, ``MonteCarloResult`` -> Monte-Carlo).
 
 from __future__ import annotations
 
+import contextlib
+import logging
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtCore import QSettings, Qt, QUrl
+from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
+    QApplication,
+    QDockWidget,
     QFileDialog,
     QHBoxLayout,
     QMainWindow,
+    QMenu,
+    QMessageBox,
+    QPlainTextEdit,
     QProgressBar,
     QPushButton,
     QScrollArea,
     QSplitter,
     QTabWidget,
     QVBoxLayout,
+    QWhatsThis,
     QWidget,
 )
 
@@ -36,7 +46,7 @@ from optivibe.analysis import (
     save_monte_carlo_npz,
     save_sweep_npz,
 )
-from optivibe.core.config.loader import load_constants
+from optivibe.core.config.loader import default_config_dir, load_constants
 from optivibe.core.config.models import ScenarioConfig
 from optivibe.core.config.subsystems import SystemConfig
 from optivibe.core.logging import get_logger
@@ -46,7 +56,16 @@ from optivibe.gui.controllers.scenario_builder import (
     build_scenario_config,
     build_sweep_spec,
 )
-from optivibe.gui.controllers.system_builder import build_system_config
+from optivibe.gui.controllers.system_builder import build_system_config, resolve_system_variant
+from optivibe.gui.i18n import (
+    LANGUAGES,
+    current_language,
+    language_bus,
+    set_language,
+    t,
+    tr,
+)
+from optivibe.gui.theme import THEMES, apply_theme
 from optivibe.gui.widgets import (
     ControlPanel,
     LiveView,
@@ -55,6 +74,7 @@ from optivibe.gui.widgets import (
     ReportPanel,
     SweepPanel,
 )
+from optivibe.gui.widgets.preferences_dialog import PreferencesDialog
 from optivibe.gui.workers.jobs import (
     Job,
     MonteCarloJob,
@@ -63,12 +83,36 @@ from optivibe.gui.workers.jobs import (
     ScenarioJob,
     SweepJob,
 )
+from optivibe.mechanics.cantilever import first_mode_hz
 from optivibe.pipeline import RunArtifacts
 from optivibe.viz.analysis import plot_nea_budget, plot_truth_vs_recovery_avx
 
 logger = get_logger(__name__)
 
 __all__ = ["MainWindow"]
+
+#: QSettings identity (organization / application).
+_SETTINGS_ORG = "OptiVibe"
+_SETTINGS_APP = "OptiVibe"
+
+#: About-box text (English msgid; translated via ``t`` at display time).
+_ABOUT_TEXT = (
+    "OptiVibe -- digital twin of a fiber-optic vibration sensor.\n"
+    "Desktop shell over a Qt-free core; all physics lives in the core."
+)
+
+
+class _QtLogHandler(logging.Handler):
+    """A logging handler that appends records to the log-dock text view."""
+
+    def __init__(self, view: QPlainTextEdit) -> None:
+        super().__init__()
+        self._view = view
+
+    def emit(self, record: logging.LogRecord) -> None:
+        """Append a formatted record (called on the logging thread's caller)."""
+        with contextlib.suppress(RuntimeError):  # view already destroyed
+            self._view.appendPlainText(self.format(record))
 
 
 class MainWindow(QMainWindow):
@@ -84,7 +128,19 @@ class MainWindow(QMainWindow):
 
     def __init__(self, config_dir: Path | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("OptiVibe - fiber-optic vibration sensor digital twin")
+        self._settings = QSettings(_SETTINGS_ORG, _SETTINGS_APP)
+        # Apply the saved language BEFORE any widget is built, so the whole tree
+        # is constructed in the right language (SW-65).
+        saved_language = str(self._settings.value("language", current_language()))
+        if saved_language in LANGUAGES:
+            set_language(saved_language)
+        self._theme = str(self._settings.value("theme", "light"))
+        self._restore_geometry = self._settings.value("restore_geometry", True, type=bool)
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            apply_theme(app, self._theme)
+
+        self.setWindowTitle(t("OptiVibe - fiber-optic vibration sensor digital twin"))
         self.resize(1280, 820)
         self._config_dir = config_dir
         self._beta1_l = load_constants().universal.beta1_l
@@ -106,30 +162,40 @@ class MainWindow(QMainWindow):
         self._monte.run_requested.connect(self._on_monte_carlo)
         self._physics.nea_requested.connect(self._on_report)
 
-        self._run_button = QPushButton("Run")
-        self._report_button = QPushButton("Report")
-        self._cancel_button = QPushButton("Cancel")
-        self._export_button = QPushButton("Export...")
+        self._run_button = QPushButton(t("Run"))
+        self._report_button = QPushButton(t("Report"))
+        self._cancel_button = QPushButton(t("Cancel"))
+        self._export_button = QPushButton(t("Export..."))
+        self._check_button = QPushButton(t("Check composition"))
         self._run_button.clicked.connect(self._on_run)
         self._report_button.clicked.connect(self._on_report)
         self._cancel_button.clicked.connect(self._controller.cancel)
         self._export_button.clicked.connect(self._on_export_clicked)
+        self._check_button.clicked.connect(self._on_check)
         self._cancel_button.setEnabled(False)
 
         self._tabs = QTabWidget()
-        self._tabs.addTab(self._live, "Live")
-        self._tabs.addTab(self._report, "Report")
-        self._tabs.addTab(self._sweep, "Sweeps")
-        self._tabs.addTab(self._monte, "Monte-Carlo")
-        self._tabs.addTab(self._physics, "Physics")
+        self._tabs.addTab(self._live, t("Live"))
+        self._tabs.addTab(self._report, t("Report"))
+        self._tabs.addTab(self._sweep, t("Sweeps"))
+        self._tabs.addTab(self._monte, t("Monte-Carlo"))
+        self._tabs.addTab(self._physics, t("Physics"))
         self._tabs.currentChanged.connect(self._on_tab_changed)
 
         self.setCentralWidget(self._build_central())
+        self._build_menu()
+        self._build_log_dock()
         self._progress = QProgressBar()
         self._progress.setMaximumWidth(160)
         self._progress.hide()
         self.statusBar().addPermanentWidget(self._progress)
-        self.statusBar().showMessage("Ready. Pick a variant and excitation, then Run.")
+        self.statusBar().showMessage(t("Ready. Pick a variant and excitation, then Run."))
+
+        language_bus().changed.connect(self._relanguage)
+        if self._restore_geometry:
+            geometry = self._settings.value("geometry")
+            if geometry is not None:
+                self.restoreGeometry(geometry)
 
     def _build_central(self) -> QWidget:
         """Assemble the control column, action bar and tab area."""
@@ -137,6 +203,7 @@ class MainWindow(QMainWindow):
         for button in (
             self._run_button,
             self._report_button,
+            self._check_button,
             self._cancel_button,
             self._export_button,
         ):
@@ -147,6 +214,7 @@ class MainWindow(QMainWindow):
         scroll.setWidgetResizable(True)
         scroll.setWidget(self._panel)
         scroll.setMinimumWidth(330)
+        self._scroll = scroll
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
@@ -160,6 +228,234 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         return splitter
+
+    # ------------------------------------------------------------------ #
+    # Menu bar / shortcuts (Batch 1)
+    # ------------------------------------------------------------------ #
+    def _build_menu(self) -> None:
+        """Build the File / Run / View / Help menu bar with shortcuts."""
+        bar = self.menuBar()
+        self._menu_actions: dict[str, QAction] = {}
+
+        def _act(
+            menu: QMenu,
+            key: str,
+            slot: Callable[[], object],
+            shortcut: QKeySequence | QKeySequence.StandardKey | None = None,
+        ) -> QAction:
+            action = QAction(tr(key), self)
+            if shortcut is not None:
+                action.setShortcut(shortcut)
+            action.triggered.connect(slot)
+            menu.addAction(action)
+            self._menu_actions[key] = action
+            return action
+
+        file_menu = bar.addMenu(tr("menu.file"))
+        self._menus = {"menu.file": file_menu}
+        _act(file_menu, "menu.export", self._on_export_clicked)
+        file_menu.addSeparator()
+        _act(file_menu, "menu.quit", self.close, QKeySequence.StandardKey.Quit)
+
+        run_menu = bar.addMenu(tr("menu.run"))
+        self._menus["menu.run"] = run_menu
+        _act(run_menu, "menu.run_action", self._on_run, QKeySequence("Ctrl+R"))
+        _act(run_menu, "menu.report_action", self._on_report, QKeySequence("Ctrl+Shift+R"))
+        _act(run_menu, "menu.check_action", self._on_check, QKeySequence("Ctrl+K"))
+        _act(run_menu, "menu.cancel_action", self._controller.cancel, QKeySequence("Esc"))
+
+        view_menu = bar.addMenu(tr("menu.view"))
+        self._menus["menu.view"] = view_menu
+        _act(view_menu, "menu.preferences", self._on_preferences, QKeySequence("Ctrl+,"))
+        self._log_action = _act(view_menu, "menu.toggle_log", self._toggle_log)
+        self._log_action.setCheckable(True)
+
+        help_menu = bar.addMenu(tr("menu.help"))
+        self._menus["menu.help"] = help_menu
+        _act(help_menu, "menu.whats_this", self._on_whats_this, QKeySequence("Shift+F1"))
+        _act(help_menu, "menu.manual", self._open_manual)
+        help_menu.addSeparator()
+        _act(help_menu, "menu.about", self._on_about)
+
+    def _retranslate_menu(self) -> None:
+        """Re-label the menu titles and actions after a language change."""
+        for key, menu in getattr(self, "_menus", {}).items():
+            menu.setTitle(tr(key))
+        for key, action in getattr(self, "_menu_actions", {}).items():
+            action.setText(tr(key))
+
+    # ------------------------------------------------------------------ #
+    # Log dock (Batch 1)
+    # ------------------------------------------------------------------ #
+    def _build_log_dock(self) -> None:
+        """Add a dockable log panel that mirrors the application logger."""
+        self._log_view = QPlainTextEdit()
+        self._log_view.setReadOnly(True)
+        self._log_view.setMaximumBlockCount(2000)
+        clear = QPushButton(t("Clear"))
+        clear.clicked.connect(self._log_view.clear)
+        body = QWidget()
+        layout = QVBoxLayout(body)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.addWidget(self._log_view, stretch=1)
+        layout.addWidget(clear)
+        self._log_dock = QDockWidget(t("Log"), self)
+        self._log_dock.setObjectName("log_dock")
+        self._log_dock.setWidget(body)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._log_dock)
+        self._log_dock.hide()
+
+        self._log_handler = _QtLogHandler(self._log_view)
+        self._log_handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+        logging.getLogger("optivibe").addHandler(self._log_handler)
+
+    def _toggle_log(self) -> None:
+        """Show or hide the log dock (keeps the menu check in sync)."""
+        visible = not self._log_dock.isVisible()
+        self._log_dock.setVisible(visible)
+        self._log_action.setChecked(visible)
+
+    # ------------------------------------------------------------------ #
+    # Composition check (Batch 1)
+    # ------------------------------------------------------------------ #
+    def _on_check(self) -> None:
+        """Dry-run resolve the composition and report the guard outcome.
+
+        A lightweight, synchronous resolve (config read only, not the pipeline):
+        it surfaces the geometry / wash-out guards (doc 03 §6, R-13) as a visible
+        pass/fail instead of a run-time failure. On success it reports f1 and Q.
+        """
+        try:
+            system = build_system_config(self._panel.system_payload())
+        except (ValueError, TypeError) as exc:
+            self._show_check(False, str(exc).splitlines()[0])
+            return
+        config_dir = self._config_dir or default_config_dir()
+        try:
+            variant = resolve_system_variant(system, config_dir)
+        except (ValueError, TypeError) as exc:
+            self._show_check(False, str(exc).splitlines()[0])
+            return
+        try:
+            constants = load_constants(config_dir / "constants.yaml")
+            f1 = f"{first_mode_hz(constants, variant.length_m):.1f}"
+        except Exception:
+            f1 = "-"
+        q = f"{variant.q_total:.6g}" if variant.q_total is not None else "-"
+        self._show_check(True, tr("check.resolved", name=variant.name, f1=f1, q=q))
+
+    def _show_check(self, ok: bool, detail: str) -> None:
+        """Show the composition-check result in a message box."""
+        box = QMessageBox(self)
+        box.setWindowTitle(tr("check.title"))
+        if ok:
+            box.setIcon(QMessageBox.Icon.Information)
+            box.setText(tr("check.ok"))
+            box.setInformativeText(detail)
+        else:
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setText(tr("check.fail", reason=detail))
+        box.exec()
+
+    # ------------------------------------------------------------------ #
+    # Preferences / theme / language (Batch 1)
+    # ------------------------------------------------------------------ #
+    def _on_preferences(self) -> None:
+        """Open the Preferences dialog and apply / persist the selection."""
+        dialog = PreferencesDialog(
+            language=current_language(),
+            theme=self._theme,
+            restore_geometry=bool(self._restore_geometry),
+            parent=self,
+        )
+        dialog.language_previewed.connect(set_language)
+        dialog.theme_previewed.connect(self._apply_theme)
+        if dialog.exec():
+            choice = dialog.selection()
+            set_language(str(choice["language"]))
+            self._apply_theme(str(choice["theme"]))
+            self._restore_geometry = bool(choice["restore_geometry"])
+            self._settings.setValue("language", current_language())
+            self._settings.setValue("theme", self._theme)
+            self._settings.setValue("restore_geometry", self._restore_geometry)
+        else:
+            self._apply_theme(self._theme)
+
+    def _apply_theme(self, name: str) -> None:
+        """Apply a theme name to the application and remember it."""
+        if name not in THEMES:
+            return
+        self._theme = name
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            apply_theme(app, name)
+
+    def _relanguage(self, code: str) -> None:
+        """Rebuild the control panel and re-label the chrome in the new language.
+
+        Composition and scenario state survive through a payload round-trip
+        (SW-65): everything the user edited is re-applied to the freshly-built
+        panel, so the switch is transparent.
+        """
+        system_payload = self._panel.system_payload()
+        scenario_payload = self._panel.scenario_payload()
+        current_tab = self._tabs.currentIndex()
+
+        new_panel = ControlPanel(config_dir=self._config_dir)
+        try:
+            new_panel.apply_system_payload(system_payload)
+            new_panel.restore_scenario(scenario_payload)
+        except (ValueError, TypeError):  # pragma: no cover - defensive
+            logger.warning("could not fully restore panel state across a language change")
+
+        old_panel = self._panel
+        self._panel = new_panel
+        # QScrollArea.setWidget deletes the previously set widget, so we must not
+        # delete old_panel again afterwards (double-free).
+        self._scroll.setWidget(new_panel)
+        del old_panel
+
+        new_physics = PhysicsTab(new_panel, config_dir=self._config_dir)
+        new_physics.nea_requested.connect(self._on_report)
+        self._tabs.removeTab(self._tabs.indexOf(self._physics))
+        self._physics.deleteLater()
+        self._physics = new_physics
+        self._tabs.addTab(self._physics, t("Physics"))
+
+        self._retranslate_chrome()
+        self._tabs.setCurrentIndex(current_tab)
+
+    def _retranslate_chrome(self) -> None:
+        """Re-label the window title, tabs, buttons and menu after a switch."""
+        self.setWindowTitle(t("OptiVibe - fiber-optic vibration sensor digital twin"))
+        self._run_button.setText(t("Run"))
+        self._report_button.setText(t("Report"))
+        self._cancel_button.setText(t("Cancel"))
+        self._export_button.setText(t("Export..."))
+        self._check_button.setText(t("Check composition"))
+        for index, key in enumerate(("Live", "Report", "Sweeps", "Monte-Carlo")):
+            self._tabs.setTabText(index, t(key))
+        self._log_dock.setWindowTitle(t("Log"))
+        self._retranslate_menu()
+
+    # ------------------------------------------------------------------ #
+    # Help (Batch 1)
+    # ------------------------------------------------------------------ #
+    def _on_whats_this(self) -> None:
+        """Enter Qt's What's-This mode (click a widget for its help)."""
+        QWhatsThis.enterWhatsThisMode()
+
+    def _open_manual(self) -> None:
+        """Open the local documentation directory, if present."""
+        docs = Path(__file__).resolve().parents[3] / "docs"
+        if docs.is_dir():
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(docs)))
+        else:
+            QMessageBox.information(self, tr("menu.manual"), str(docs))
+
+    def _on_about(self) -> None:
+        """Show the About box."""
+        QMessageBox.about(self, tr("menu.about"), t(_ABOUT_TEXT))
 
     # ------------------------------------------------------------------ #
     # Actions
@@ -193,7 +489,7 @@ class MainWindow(QMainWindow):
         try:
             spec = build_sweep_spec(self._sweep.payload())
         except (ValueError, TypeError) as exc:
-            self.statusBar().showMessage(f"Invalid sweep: {exc}")
+            self.statusBar().showMessage(tr("status.invalid_sweep", exc=exc))
             return
         self._start(SweepJob(spec=spec), "sweep")
 
@@ -202,7 +498,7 @@ class MainWindow(QMainWindow):
         try:
             spec = build_monte_carlo_spec(self._monte.payload())
         except (ValueError, TypeError) as exc:
-            self.statusBar().showMessage(f"Invalid Monte-Carlo: {exc}")
+            self.statusBar().showMessage(tr("status.invalid_mc", exc=exc))
             return
         self._start(MonteCarloJob(spec=spec), "monte-carlo")
 
@@ -211,7 +507,9 @@ class MainWindow(QMainWindow):
         try:
             return build_scenario_config(self._panel.scenario_payload())
         except (ValueError, TypeError) as exc:
-            self.statusBar().showMessage(f"Invalid scenario: {str(exc).splitlines()[0]}")
+            self.statusBar().showMessage(
+                tr("status.invalid_scenario", exc=str(exc).splitlines()[0])
+            )
             return None
 
     def _build_system(self) -> SystemConfig | None:
@@ -224,7 +522,9 @@ class MainWindow(QMainWindow):
         try:
             return build_system_config(self._panel.system_payload())
         except (ValueError, TypeError) as exc:
-            self.statusBar().showMessage(f"Invalid composition: {str(exc).splitlines()[0]}")
+            self.statusBar().showMessage(
+                tr("status.invalid_composition", exc=str(exc).splitlines()[0])
+            )
             return None
 
     def _start(self, job: Job, label: str) -> None:
@@ -232,19 +532,19 @@ class MainWindow(QMainWindow):
         if self._controller.is_running():
             return
         self._set_running(True)
-        self.statusBar().showMessage(f"Running {label} ...")
+        self.statusBar().showMessage(tr("status.running", label=label))
         try:
             self._controller.start(job)
         except RuntimeError as exc:  # pragma: no cover - guarded by is_running
             self._set_running(False)
-            self.statusBar().showMessage(f"Could not start: {exc}")
+            self.statusBar().showMessage(tr("status.could_not_start", exc=exc))
 
     # ------------------------------------------------------------------ #
     # Controller signals
     # ------------------------------------------------------------------ #
     def _on_progress(self, message: str) -> None:
         """Show a coarse progress message."""
-        self.statusBar().showMessage(f"... {message}")
+        self.statusBar().showMessage(tr("status.progress", message=message))
 
     def _on_finished(self, result: object) -> None:
         """Route a finished job result to the matching tab."""
@@ -262,30 +562,42 @@ class MainWindow(QMainWindow):
                 self._physics.set_nea_figure(plot_nea_budget(result.nea))
             self._tabs.setCurrentWidget(self._report)
             self.statusBar().showMessage(
-                f"Report ready: amplitude ratio {result.budget.amplitude_ratio:.4f}, "
-                f"recovery rel err {result.budget.rms_error_rel:.2e}."
+                tr(
+                    "status.report_ready",
+                    ratio=result.budget.amplitude_ratio,
+                    rel=result.budget.rms_error_rel,
+                )
             )
         elif isinstance(result, SweepResult):
             self._sweep.show_result(result)
             self._tabs.setCurrentWidget(self._sweep)
             self.statusBar().showMessage(
-                f"Sweep '{result.name}' ({result.mode}) over {result.parameter}: "
-                f"{len(result.axis_labels)} points."
+                tr(
+                    "status.sweep_done",
+                    name=result.name,
+                    mode=result.mode,
+                    parameter=result.parameter,
+                    n=len(result.axis_labels),
+                )
             )
         elif isinstance(result, MonteCarloResult):
             self._monte.show_result(result)
             self._tabs.setCurrentWidget(self._monte)
-            self.statusBar().showMessage(f"Monte-Carlo '{result.name}': {result.n_draws} draws.")
+            self.statusBar().showMessage(tr("status.mc_done", name=result.name, n=result.n_draws))
         else:  # pragma: no cover - defensive
-            self.statusBar().showMessage("Finished with an unrecognised result.")
+            self.statusBar().showMessage(tr("status.unrecognised"))
 
     def _announce_run(self, artifacts: RunArtifacts) -> None:
         """Status line for a finished scenario run."""
         result = artifacts.result
         dominant = ", ".join(f"{f:.2f}" for f in result.dominant_freqs_hz) or "-"
         self.statusBar().showMessage(
-            f"Done: variant {artifacts.variant.name}, {result.n_samples} samples, "
-            f"dominant {dominant} Hz."
+            tr(
+                "status.run_done",
+                name=artifacts.variant.name,
+                n=result.n_samples,
+                dominant=dominant,
+            )
         )
 
     def _on_tab_changed(self, index: int) -> None:
@@ -296,12 +608,12 @@ class MainWindow(QMainWindow):
     def _on_failed(self, message: str) -> None:
         """Report a failed job."""
         self._set_running(False)
-        self.statusBar().showMessage(f"Failed: {message}")
+        self.statusBar().showMessage(tr("status.failed", message=message))
 
     def _on_cancelled(self) -> None:
         """Report a cancelled job (its result was dropped)."""
         self._set_running(False)
-        self.statusBar().showMessage("Cancelled.")
+        self.statusBar().showMessage(tr("status.cancelled"))
 
     def _set_running(self, running: bool) -> None:
         """Lock/unlock the action buttons and the busy indicator."""
@@ -318,12 +630,12 @@ class MainWindow(QMainWindow):
     def _on_export_clicked(self) -> None:  # pragma: no cover - dialog
         """Pick a directory and export the latest result into it."""
         if self._last_result is None:
-            self.statusBar().showMessage("Nothing to export yet.")
+            self.statusBar().showMessage(tr("status.nothing_export"))
             return
-        directory = QFileDialog.getExistingDirectory(self, "Export to directory")
+        directory = QFileDialog.getExistingDirectory(self, t("Export to directory"))
         if directory:
             saved = self.export_to(Path(directory))
-            self.statusBar().showMessage(f"Exported {len(saved)} file(s) to {directory}.")
+            self.statusBar().showMessage(tr("status.exported", n=len(saved), directory=directory))
 
     def export_to(self, directory: Path) -> list[Path]:
         """Export the latest result (figures + ``.npz``) into ``directory``.
@@ -389,7 +701,14 @@ class MainWindow(QMainWindow):
     # Lifecycle / test accessors
     # ------------------------------------------------------------------ #
     def closeEvent(self, event: QCloseEvent) -> None:
-        """Stop the animation and cancel any running job on close."""
+        """Persist settings, stop the animation and cancel any running job."""
+        self._settings.setValue("language", current_language())
+        self._settings.setValue("theme", self._theme)
+        self._settings.setValue("restore_geometry", self._restore_geometry)
+        self._settings.setValue("geometry", self.saveGeometry())
+        handler = getattr(self, "_log_handler", None)
+        if handler is not None:
+            logging.getLogger("optivibe").removeHandler(handler)
         self._live.stop()
         self._controller.cancel()
         super().closeEvent(event)

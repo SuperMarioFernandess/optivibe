@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from optivibe.gui.i18n import t
 from optivibe.gui.widgets.ui_helpers import with_help
 
 __all__ = ["ExcitationBuilder"]
@@ -181,7 +182,7 @@ class _MultitoneForm(QWidget):
         self._rows: list[_ToneRow] = []
         self._phase = QCheckBox("include per-tone phase")
         self._phase.toggled.connect(self._on_phase_toggled)
-        self._add_button = QPushButton("+ component")
+        self._add_button = QPushButton(t("+ component"))
         self._add_button.clicked.connect(lambda: self._add_row(240.0, 0.5, 0.0))
 
         self._rows_box = QVBoxLayout()
@@ -201,14 +202,14 @@ class _MultitoneForm(QWidget):
         freq_spin = _spin(0.1, 1.0e5, freq, decimals=2, step=10.0)
         amp_spin = _spin(1e-3, 200.0, amp, decimals=3, step=0.1)
         phase_spin = _spin(-3.1416, 3.1416, phase, decimals=3, step=0.1)
-        phase_label = QLabel("phase [rad]")
-        remove = QPushButton("x")
+        phase_label = QLabel(t("phase [rad]"))
+        remove = QPushButton(t("x"))
         remove.setMaximumWidth(28)
 
         row_layout = QHBoxLayout()
-        row_layout.addWidget(QLabel("f [Hz]"))
+        row_layout.addWidget(QLabel(t("f [Hz]")))
         row_layout.addWidget(freq_spin)
-        row_layout.addWidget(QLabel("amp [g]"))
+        row_layout.addWidget(QLabel(t("amp [g]")))
         row_layout.addWidget(amp_spin)
         row_layout.addWidget(phase_label)
         row_layout.addWidget(phase_spin)
@@ -242,6 +243,24 @@ class _MultitoneForm(QWidget):
     def count(self) -> int:
         """Return the number of components (exposed for tests)."""
         return len(self._rows)
+
+    def set_tones(self, tones: list[list[float]]) -> None:
+        """Replace the component rows from ``[[f, a]]`` / ``[[f, a, phase]]``.
+
+        Used to restore state across a language rebuild (SW-65).
+        """
+        for entry in list(self._rows):
+            self._rows.remove(entry)
+            self._rows_box.removeWidget(entry.holder)
+            entry.holder.setParent(None)
+            entry.holder.deleteLater()
+        has_phase = any(len(tone) >= 3 for tone in tones)
+        self._phase.setChecked(has_phase)
+        for tone in tones or [[240.0, 0.5, 0.0]]:
+            freq = float(tone[0])
+            amp = float(tone[1])
+            phase = float(tone[2]) if len(tone) >= 3 else 0.0
+            self._add_row(freq, amp, phase)
 
     def tones(self) -> list[list[float]]:
         """Collect the tones as ``[[f, a]]`` or ``[[f, a, phase]]`` lists."""
@@ -277,13 +296,13 @@ class ExcitationBuilder(QWidget):
         self._kind.currentTextChanged.connect(self._on_kind_changed)
 
         common = QFormLayout()
-        common.addRow("Kind", with_help(self._kind, "Kind", _KIND_HELP))
-        common.addRow("Axis", with_help(self._axis, "Axis", _AXIS_HELP))
-        self._grid_row_label = QLabel("Sampling")
+        common.addRow(t("Kind"), with_help(self._kind, "Kind", _KIND_HELP))
+        common.addRow(t("Axis"), with_help(self._axis, "Axis", _AXIS_HELP))
+        self._grid_row_label = QLabel(t("Sampling"))
         grid_row = QHBoxLayout()
-        grid_row.addWidget(QLabel("fs [Hz]"))
+        grid_row.addWidget(QLabel(t("fs [Hz]")))
         grid_row.addWidget(self._fs)
-        grid_row.addWidget(QLabel("dur [s]"))
+        grid_row.addWidget(QLabel(t("dur [s]")))
         grid_row.addWidget(self._duration)
         self._sampling_holder = self._wrap(grid_row)
         common.addRow(
@@ -370,7 +389,7 @@ class ExcitationBuilder(QWidget):
 
         # csv
         self._csv_path = QLineEdit()
-        self._csv_browse = QPushButton("Browse...")
+        self._csv_browse = QPushButton(t("Browse..."))
         self._csv_browse.clicked.connect(lambda: self._browse(self._csv_path, "CSV (*.csv)"))
         self._csv_column = QSpinBox()
         self._csv_column.setRange(0, 64)
@@ -395,7 +414,7 @@ class ExcitationBuilder(QWidget):
 
         # wav
         self._wav_path = QLineEdit()
-        self._wav_browse = QPushButton("Browse...")
+        self._wav_browse = QPushButton(t("Browse..."))
         self._wav_browse.clicked.connect(lambda: self._browse(self._wav_path, "WAV (*.wav)"))
         self._wav_channel = QSpinBox()
         self._wav_channel.setRange(0, 32)
@@ -416,7 +435,7 @@ class ExcitationBuilder(QWidget):
 
         # tdms (NI TDMS; fs from wf_increment when "fs [Hz]" is 0)
         self._tdms_path = QLineEdit()
-        tdms_browse = QPushButton("Browse...")
+        tdms_browse = QPushButton(t("Browse..."))
         tdms_browse.clicked.connect(lambda: self._browse(self._tdms_path, "TDMS (*.tdms)"))
         self._tdms_group = QLineEdit()
         self._tdms_group.setPlaceholderText("(first group)")
@@ -443,7 +462,7 @@ class ExcitationBuilder(QWidget):
 
         # uff (UFF/UNV dataset-58; fs from abscissa_inc when "fs [Hz]" is 0)
         self._uff_path = QLineEdit()
-        uff_browse = QPushButton("Browse...")
+        uff_browse = QPushButton(t("Browse..."))
         uff_browse.clicked.connect(lambda: self._browse(self._uff_path, "UFF (*.uff *.unv)"))
         self._uff_index = QSpinBox()
         self._uff_index.setRange(0, 4096)
@@ -467,7 +486,7 @@ class ExcitationBuilder(QWidget):
 
         # mat (MATLAB v4/v5/v7; fs required)
         self._mat_path = QLineEdit()
-        mat_browse = QPushButton("Browse...")
+        mat_browse = QPushButton(t("Browse..."))
         mat_browse.clicked.connect(lambda: self._browse(self._mat_path, "MAT (*.mat)"))
         self._mat_key = QLineEdit()
         self._mat_key.setPlaceholderText("variable name")
@@ -494,7 +513,7 @@ class ExcitationBuilder(QWidget):
 
         # hdf5 (.h5/.hdf5; fs required)
         self._hdf5_path = QLineEdit()
-        hdf5_browse = QPushButton("Browse...")
+        hdf5_browse = QPushButton(t("Browse..."))
         hdf5_browse.clicked.connect(lambda: self._browse(self._hdf5_path, "HDF5 (*.h5 *.hdf5)"))
         self._hdf5_dataset = QLineEdit()
         self._hdf5_dataset.setPlaceholderText("/accel/x")
@@ -535,11 +554,11 @@ class ExcitationBuilder(QWidget):
         form = QFormLayout(page)
         if about is not None:
             summary, text = _ABOUT[about]
-            note = QLabel(summary)
+            note = QLabel(t(summary))
             note.setStyleSheet("color: #808080; font-style: italic;")
-            form.addRow("about", with_help(note, f"{about} excitation", text))
+            form.addRow(t("about"), with_help(note, f"{about} excitation", text))
         for label, widget in rows:
-            form.addRow(label, widget)
+            form.addRow(t(label), widget)
         return page
 
     def _browse(self, target: QLineEdit, file_filter: str) -> None:  # pragma: no cover - dialog
@@ -624,3 +643,84 @@ class ExcitationBuilder(QWidget):
             base["fs_hz"] = self._hdf5_fs.value()
             base["units"] = self._hdf5_units.currentText()
         return base
+
+    def load_payload(self, payload: dict[str, Any]) -> None:
+        """Restore the widgets from an :meth:`excitation_payload` mapping.
+
+        Used to preserve the excitation across a language rebuild (SW-65).
+        Unknown or missing fields are left at their freshly-built defaults.
+        """
+        kind = str(payload.get("kind", self._kind.currentText()))
+        if kind in _KINDS:
+            self._kind.setCurrentText(kind)
+        axis = str(payload.get("axis", self._axis.currentText()))
+        if axis in ("x", "y", "z"):
+            self._axis.setCurrentText(axis)
+        if "fs_hz" in payload:
+            self._fs.setValue(float(payload["fs_hz"]))
+        if "duration_s" in payload:
+            self._duration.setValue(float(payload["duration_s"]))
+
+        def _set(spin: Any, key: str) -> None:
+            if key in payload:
+                spin.setValue(float(payload[key]))
+
+        if kind == "sine":
+            _set(self._sine_freq, "frequency_hz")
+            _set(self._sine_amp, "amplitude_g")
+        elif kind == "multitone":
+            self._multitone.set_tones([list(map(float, tone)) for tone in payload.get("tones", [])])
+        elif kind == "sweep":
+            _set(self._sweep_f0, "f_start_hz")
+            _set(self._sweep_f1, "f_end_hz")
+            _set(self._sweep_amp, "amplitude_g")
+            if "method" in payload:
+                self._sweep_method.setCurrentText(str(payload["method"]))
+        elif kind == "random":
+            band = payload.get("band_hz") or [None, None]
+            if band[0] is not None:
+                self._rand_lo.setValue(float(band[0]))
+            if band[1] is not None:
+                self._rand_hi.setValue(float(band[1]))
+            _set(self._rand_grms, "g_rms")
+        elif kind == "shock":
+            _set(self._shock_peak, "peak_g")
+            _set(self._shock_pulse, "pulse_ms")
+            _set(self._shock_delay, "delay_s")
+        elif kind == "csv":
+            self._csv_path.setText(str(payload.get("path", "")))
+            _set(self._csv_column, "column")
+            _set(self._csv_fs, "fs_hz")
+            if "units" in payload:
+                self._csv_units.setCurrentText(str(payload["units"]))
+        elif kind == "wav":
+            self._wav_path.setText(str(payload.get("path", "")))
+            _set(self._wav_channel, "channel")
+            _set(self._wav_fs_g, "full_scale_g")
+        elif kind == "tdms":
+            self._tdms_path.setText(str(payload.get("path", "")))
+            self._tdms_group.setText(str(payload.get("group", "")))
+            _set(self._tdms_channel, "channel")
+            _set(self._tdms_fs, "fs_hz")
+            if "units" in payload:
+                self._tdms_units.setCurrentText(str(payload["units"]))
+        elif kind == "uff":
+            self._uff_path.setText(str(payload.get("path", "")))
+            _set(self._uff_index, "dataset_index")
+            _set(self._uff_fs, "fs_hz")
+            if "units" in payload:
+                self._uff_units.setCurrentText(str(payload["units"]))
+        elif kind == "mat":
+            self._mat_path.setText(str(payload.get("path", "")))
+            self._mat_key.setText(str(payload.get("data_key", "")))
+            _set(self._mat_column, "column")
+            _set(self._mat_fs, "fs_hz")
+            if "units" in payload:
+                self._mat_units.setCurrentText(str(payload["units"]))
+        elif kind == "hdf5":
+            self._hdf5_path.setText(str(payload.get("path", "")))
+            self._hdf5_dataset.setText(str(payload.get("dataset", "")))
+            _set(self._hdf5_column, "column")
+            _set(self._hdf5_fs, "fs_hz")
+            if "units" in payload:
+                self._hdf5_units.setCurrentText(str(payload["units"]))
