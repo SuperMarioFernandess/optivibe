@@ -25,7 +25,9 @@ from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QSplitter, QVBoxLayout, QW
 
 from optivibe.analysis import NeaBudget
 from optivibe.core.types import FloatArray, VibrationResult
+from optivibe.gui.i18n import t
 from optivibe.gui.widgets.cantilever_view import CantileverView
+from optivibe.gui.widgets.ui_helpers import tab_header
 from optivibe.pipeline import RunArtifacts
 
 __all__ = ["LiveView"]
@@ -67,41 +69,43 @@ class LiveView(QWidget):
         self._cantilever = CantileverView()
         self._plots = pg.GraphicsLayoutWidget()
 
-        self._p_accel = pg.PlotItem(title="Acceleration: input vs recovered")
+        self._p_accel = pg.PlotItem(title=t("Acceleration: input vs recovered"))
         self._p_accel.addLegend(offset=(-10, 5))
         self._accel_true = self._p_accel.plot(
-            [], [], pen=pg.mkPen("#1f77b4", width=2), name="input"
+            [], [], pen=pg.mkPen("#1f77b4", width=2), name=t("input")
         )
         self._accel_rec = self._p_accel.plot(
-            [], [], pen=pg.mkPen("#ff7f0e", width=1), name="recovered"
+            [], [], pen=pg.mkPen("#ff7f0e", width=1), name=t("recovered")
         )
-        self._p_accel.setLabel("left", "a", units="m/s^2")
+        self._p_accel.setLabel("left", t("a"), units="m/s^2")
 
-        self._p_det = pg.PlotItem(title="Detector signal")
+        self._p_det = pg.PlotItem(title=t("Detector signal"))
         self._det = self._p_det.plot([], [], pen=pg.mkPen("#2ca02c", width=1))
-        self._p_det.setLabel("left", "samples")
+        self._p_det.setLabel("left", t("samples"))
 
-        self._p_vel = pg.PlotItem(title="Recovered velocity")
+        self._p_vel = pg.PlotItem(title=t("Recovered velocity"))
         self._vel = self._p_vel.plot([], [], pen=pg.mkPen("#9467bd", width=1))
-        self._p_vel.setLabel("left", "v", units="m/s")
+        self._p_vel.setLabel("left", t("v"), units="m/s")
 
-        self._p_disp = pg.PlotItem(title="Recovered displacement")
+        self._p_disp = pg.PlotItem(title=t("Recovered displacement"))
         self._disp = self._p_disp.plot([], [], pen=pg.mkPen("#8c564b", width=1))
-        self._p_disp.setLabel("left", "x", units="m")
-        self._p_disp.setLabel("bottom", "time", units="s")
+        self._p_disp.setLabel("left", t("x"), units="m")
+        self._p_disp.setLabel("bottom", t("time"), units="s")
 
-        self._p_spec = pg.PlotItem(title="Recovered amplitude spectrum")
+        self._p_spec = pg.PlotItem(title=t("Recovered amplitude spectrum"))
         self._spec = self._p_spec.plot([], [], pen=pg.mkPen("#1f77b4", width=1))
-        self._p_spec.setLabel("bottom", "frequency", units="Hz")
-        self._p_spec.setLabel("left", "amplitude")
+        self._p_spec.setLabel("bottom", t("frequency"), units="Hz")
+        self._p_spec.setLabel("left", t("amplitude"))
         self._p_spec.setLogMode(x=False, y=True)
 
-        self._p_nea = pg.PlotItem(title="NEA(f) - run Report for the budget")
-        self._p_nea.setLabel("bottom", "frequency", units="Hz")
-        self._p_nea.setLabel("left", "NEA [ug/sqrt(Hz)]")
+        self._p_nea = pg.PlotItem(title=t("NEA(f) - run Report for the budget"))
+        self._p_nea.setLabel("bottom", t("frequency"), units="Hz")
+        self._p_nea.setLabel("left", t("NEA [ug/sqrt(Hz)]"))
         self._p_nea.setLogMode(x=True, y=True)
         self._p_nea.addLegend(offset=(-10, 5))
-        self._nea_total = self._p_nea.plot([], [], pen=pg.mkPen("#000000", width=2), name="total")
+        self._nea_total = self._p_nea.plot(
+            [], [], pen=pg.mkPen("#000000", width=2), name=t("total")
+        )
 
         for plot in (self._p_accel, self._p_det, self._p_vel, self._p_disp, self._p_spec):
             plot.showGrid(x=True, y=True, alpha=0.3)
@@ -123,10 +127,40 @@ class LiveView(QWidget):
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 2)
 
+        self._header = tab_header(
+            "Live",
+            "Live view of the last run: the cantilever bend animation over "
+            "PyQtGraph panels for input-vs-recovered acceleration, the detector "
+            "signal, recovered velocity/displacement, the amplitude spectrum and "
+            "the NEA(f) density. The check-row shows/hides each panel (session "
+            "only); no controls here change the model -- edit on the left and Run.",
+        )
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self._header)
         layout.addWidget(self._visibility_bar())
         layout.addWidget(splitter)
+
+    def retranslate(self) -> None:
+        """Refresh static text after a language change (legends refresh on re-run)."""
+        self._header.retranslate()
+        self._cantilever_check.setText(t("cantilever"))
+        for key, label in _PANEL_LABELS:
+            self._checks[key].setText(t(label))
+        self._p_accel.setTitle(t("Acceleration: input vs recovered"))
+        self._p_accel.setLabel("left", t("a"), units="m/s^2")
+        self._p_det.setTitle(t("Detector signal"))
+        self._p_det.setLabel("left", t("samples"))
+        self._p_vel.setTitle(t("Recovered velocity"))
+        self._p_vel.setLabel("left", t("v"), units="m/s")
+        self._p_disp.setTitle(t("Recovered displacement"))
+        self._p_disp.setLabel("left", t("x"), units="m")
+        self._p_disp.setLabel("bottom", t("time"), units="s")
+        self._p_spec.setTitle(t("Recovered amplitude spectrum"))
+        self._p_spec.setLabel("bottom", t("frequency"), units="Hz")
+        self._p_spec.setLabel("left", t("amplitude"))
+        self._p_nea.setLabel("bottom", t("frequency"), units="Hz")
+        self._p_nea.setLabel("left", t("NEA [ug/sqrt(Hz)]"))
 
     # ------------------------------------------------------------------ #
     # Panel visibility (task S7-mod §4)
@@ -138,13 +172,14 @@ class LiveView(QWidget):
         row.setContentsMargins(2, 2, 2, 2)
         self._checks: dict[str, QCheckBox] = {}
 
-        cantilever_check = QCheckBox("cantilever")
+        self._cantilever_check = QCheckBox(t("cantilever"))
+        cantilever_check = self._cantilever_check
         cantilever_check.setChecked(True)
         cantilever_check.toggled.connect(self._cantilever.setVisible)
         row.addWidget(cantilever_check)
 
         for key, label in _PANEL_LABELS:
-            check = QCheckBox(label)
+            check = QCheckBox(t(label))
             check.setChecked(True)
             check.toggled.connect(lambda shown, k=key: self._set_panel_visible(k, shown))
             self._checks[key] = check
@@ -213,9 +248,9 @@ class LiveView(QWidget):
         """
         self._reset_nea_panel()
         if nea is None:
-            self._p_nea.setTitle("NEA(f) - not available (use the photodiode detector)")
+            self._p_nea.setTitle(t("NEA(f) - not available (use the photodiode detector)"))
             return
-        self._p_nea.setTitle("NEA(f) with shot / RIN / Johnson / thermal plateaus")
+        self._p_nea.setTitle(t("NEA(f) with shot / RIN / Johnson / thermal plateaus"))
         scale = 1.0e6 / _G0
         self._nea_total.setData(nea.freq_hz.tolist(), (nea.nea_density * scale).tolist())
         # The fourth (Brownian thermal) branch of the budget (M-12, doc 07 §2):
@@ -229,7 +264,7 @@ class LiveView(QWidget):
                     [f_lo, f_hi],
                     [level, level],
                     pen=pg.mkPen(color, width=1, style=Qt.PenStyle.DashLine),
-                    name=key,
+                    name=t(key),
                 )
 
     def show_result(self, result: VibrationResult) -> None:
@@ -248,4 +283,6 @@ class LiveView(QWidget):
     def _reset_nea_panel(self) -> None:
         """Clear the NEA panel down to the (empty) total curve."""
         self._p_nea.clear()
-        self._nea_total = self._p_nea.plot([], [], pen=pg.mkPen("#000000", width=2), name="total")
+        self._nea_total = self._p_nea.plot(
+            [], [], pen=pg.mkPen("#000000", width=2), name=t("total")
+        )

@@ -38,8 +38,10 @@ from PySide6.QtWidgets import (
 from optivibe.core.config.loader import default_config_dir, load_constants
 from optivibe.core.logging import get_logger
 from optivibe.gui.controllers.system_builder import build_system_config, resolve_system_variant
+from optivibe.gui.i18n import t
 from optivibe.gui.widgets.control_panel import ControlPanel
 from optivibe.gui.widgets.mpl_canvas import MplFigureView
+from optivibe.gui.widgets.ui_helpers import tab_header
 from optivibe.mechanics.cantilever import CantileverModel
 from optivibe.optics.reflector import build_reflector_model
 from optivibe.viz.physics import (
@@ -113,27 +115,47 @@ class PhysicsTab(QWidget):
         self._eta = MplFigureView("Press Refresh to build eta(dx).")
         self._nea = MplFigureView("Press Compute NEA(f) to run the budget.")
 
-        self._refresh_button = QPushButton("Refresh from composition")
-        self._nea_button = QPushButton("Compute NEA(f)")
+        self._refresh_button = QPushButton(t("Refresh from composition"))
+        self._nea_button = QPushButton(t("Compute NEA(f)"))
         self._refresh_button.clicked.connect(self.refresh_light)
         self._nea_button.clicked.connect(self.nea_requested)
 
         self._notes = QTextEdit()
         self._notes.setReadOnly(True)
-        self._notes.setHtml(_REFERENCE_NOTES)
+        self._notes.setHtml(t(_REFERENCE_NOTES))
 
-        tabs = QTabWidget()
-        tabs.addTab(self._curves_page(), "Design curves")
-        tabs.addTab(self._notes, "Reference notes")
+        self._tabs = QTabWidget()
+        self._tabs.addTab(self._curves_page(), t("Design curves"))
+        self._tabs.addTab(self._notes, t("Reference notes"))
 
+        self._header = tab_header(
+            "Physics",
+            "Reference design curves for the current composition, so you can see "
+            "where your edits land before running: f1(L), the lateral transfer "
+            "|H_lat(f)| and the coupling eta(dx) are light and rebuilt by Refresh; "
+            "the measured NEA(f) budget is heavy and runs via Compute NEA(f) (a "
+            "Report off the UI thread). The Reference notes tab explains the models.",
+        )
         actions = QHBoxLayout()
         actions.addWidget(self._refresh_button)
         actions.addWidget(self._nea_button)
         actions.addStretch(1)
 
         layout = QVBoxLayout(self)
+        layout.addWidget(self._header)
         layout.addLayout(actions)
-        layout.addWidget(tabs, stretch=1)
+        layout.addWidget(self._tabs, stretch=1)
+
+    def retranslate(self) -> None:
+        """Refresh static text after a language change."""
+        self._header.retranslate()
+        self._refresh_button.setText(t("Refresh from composition"))
+        self._nea_button.setText(t("Compute NEA(f)"))
+        self._tabs.setTabText(0, t("Design curves"))
+        self._tabs.setTabText(1, t("Reference notes"))
+        self._notes.setHtml(t(_REFERENCE_NOTES))
+        for view in (self._f1, self._hlat, self._eta, self._nea):
+            view.retranslate()
 
     def _curves_page(self) -> QWidget:
         """Lay out the four figure slots in a 2x2 grid."""

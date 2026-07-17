@@ -169,3 +169,72 @@ def test_preferences_dialog_previews_and_reports_selection(qtbot) -> None:
     assert previews and previews[-1] == "ru"
     assert dialog.selection()["language"] == "ru"
     assert dialog.selection()["theme"] in THEMES
+
+
+# --------------------------------------------------------------------------- #
+# What's-This help text
+# --------------------------------------------------------------------------- #
+def test_with_help_populates_whats_this(qtbot) -> None:
+    """with_help sets the widget's What's-This so Shift+F1 mode has content."""
+    from PySide6.QtWidgets import QLineEdit
+
+    from optivibe.gui.widgets.ui_helpers import with_help
+
+    edit = QLineEdit()
+    holder = with_help(edit, "Variant", "A reference note.")
+    qtbot.addWidget(holder)
+    assert edit.whatsThis().strip()
+    assert "reference note" in edit.whatsThis()
+
+
+# --------------------------------------------------------------------------- #
+# Matplotlib figure translation
+# --------------------------------------------------------------------------- #
+def test_translate_figure_localizes_axis_labels() -> None:
+    """translate_figure maps static English axis labels to Russian, no-op in EN."""
+    from matplotlib.figure import Figure
+
+    from optivibe.gui.widgets.mpl_canvas import translate_figure
+
+    set_language("ru")
+    fig = Figure()
+    ax = fig.add_subplot()
+    ax.set_xlabel("frequency [Hz]")
+    ax.set_ylabel("amplitude")
+    translate_figure(fig)
+    assert ax.get_xlabel() == "частота [Гц]"
+    assert ax.get_ylabel() == "амплитуда"
+
+    set_language("en")
+    fig2 = Figure()
+    ax2 = fig2.add_subplot()
+    ax2.set_xlabel("frequency [Hz]")
+    translate_figure(fig2)
+    assert ax2.get_xlabel() == "frequency [Hz]"
+
+
+# --------------------------------------------------------------------------- #
+# Secondary tabs: about header + live retranslation
+# --------------------------------------------------------------------------- #
+def test_secondary_tabs_have_about_headers(qtbot) -> None:
+    """Live / Report / Sweeps / Monte-Carlo / Physics each carry a tab header."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+    for panel in (window._live, window._report, window._sweep, window._monte, window._physics):
+        assert panel._header is not None
+
+
+def test_secondary_tabs_translate_on_language_switch(qtbot) -> None:
+    """Switching to Russian relabels the secondary-tab controls in place."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+    set_language("ru")
+    assert window._sweep._controls.title() == "Развёртка"
+    assert window._sweep._run.text() == "Запустить развёртку"
+    assert window._monte._run.text() == "Запустить Монте-Карло"
+    assert window._report._budget_label.text() == "Бюджет ошибок"
+    assert window._physics._refresh_button.text() == "Обновить из композиции"
+    assert window._live._cantilever_check.text() == "консоль"
+    set_language("en")
+    assert window._sweep._controls.title() == "Sweep"
+    assert window._live._cantilever_check.text() == "cantilever"

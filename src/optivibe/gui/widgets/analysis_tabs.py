@@ -31,7 +31,9 @@ from PySide6.QtWidgets import (
 )
 
 from optivibe.analysis import MonteCarloResult, SweepResult
+from optivibe.gui.i18n import t
 from optivibe.gui.widgets.mpl_canvas import MplFigureView
+from optivibe.gui.widgets.ui_helpers import tab_header, with_help
 from optivibe.gui.workers.jobs import ReportBundle
 from optivibe.viz.analysis import (
     plot_monte_carlo,
@@ -66,15 +68,33 @@ class ReportPanel(QWidget):
         self._truth = MplFigureView("Run 'Report' to build the truth-vs-recovery figure.")
         self._nea = MplFigureView("NEA budget (needs the photodiode detector).")
         self._spectrogram = MplFigureView("Recovered-acceleration spectrogram.")
-        tabs = QTabWidget()
-        tabs.addTab(self._truth, "Truth vs recovery")
-        tabs.addTab(self._nea, "NEA budget")
-        tabs.addTab(self._spectrogram, "Spectrogram")
+        self._tabs = QTabWidget()
+        self._tabs.addTab(self._truth, t("Truth vs recovery"))
+        self._tabs.addTab(self._nea, t("NEA budget"))
+        self._tabs.addTab(self._spectrogram, t("Spectrogram"))
 
+        self._header = tab_header(
+            "Report",
+            "Display-only report of the last Run: the truth-vs-recovery a/v/x "
+            "figure, the NEA(f) budget (needs the photodiode detector) and the "
+            "recovered-acceleration spectrogram, plus the error-budget summary "
+            "(amplitude ratio, recovery error). Press Report on the left to build it.",
+        )
+        self._budget_label = QLabel(t("Error budget"))
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Error budget"))
+        layout.addWidget(self._header)
+        layout.addWidget(self._budget_label)
         layout.addWidget(self._text)
-        layout.addWidget(tabs, stretch=1)
+        layout.addWidget(self._tabs, stretch=1)
+
+    def retranslate(self) -> None:
+        """Refresh static text after a language change."""
+        self._header.retranslate()
+        self._budget_label.setText(t("Error budget"))
+        for index, key in enumerate(("Truth vs recovery", "NEA budget", "Spectrogram")):
+            self._tabs.setTabText(index, t(key))
+        for view in (self._truth, self._nea, self._spectrogram):
+            view.retranslate()
 
     def show_bundle(self, bundle: ReportBundle) -> None:
         """Render a :class:`ReportBundle` (budget text + figures)."""
@@ -107,32 +127,91 @@ class SweepPanel(QWidget):
         self._num = QSpinBox()
         self._num.setRange(2, 200)
         self._num.setValue(16)
-        self._log = QCheckBox("log spacing")
-        self._run = QPushButton("Run sweep")
+        self._log = QCheckBox(t("log spacing"))
+        self._run = QPushButton(t("Run sweep"))
         self._run.clicked.connect(self.run_requested)
         self._canvas = MplFigureView("Run a sweep to see NEA / response vs the parameter.")
 
-        controls = QGroupBox("Sweep")
-        form = QFormLayout(controls)
-        form.addRow("Variant", self._variant)
-        form.addRow("Mode", self._mode)
-        form.addRow("Parameter", self._parameter)
+        self._header = tab_header(
+            "Sweeps",
+            "Sweep one parameter across a grid and plot the resulting NEA / "
+            "response, to see a trend rather than a single point. Pick the variant, "
+            "the mode (design geometry vs excitation response), the parameter, the "
+            "start/stop/count grid and linear/log spacing, then Run sweep. The heavy "
+            "run happens off the UI thread.",
+        )
+        self._controls = QGroupBox(t("Sweep"))
+        form = QFormLayout(self._controls)
+        form.addRow(
+            t("Variant"),
+            with_help(
+                self._variant,
+                "Variant",
+                "Which built-in composition (A-D) is the baseline for the sweep; every "
+                "grid point starts from it and overrides the swept parameter.",
+            ),
+        )
+        form.addRow(
+            t("Mode"),
+            with_help(
+                self._mode,
+                "Mode",
+                "'design' sweeps a geometry/design parameter (length, R_c, power, bias, "
+                "full-scale) and reports the NEA trend; 'response' sweeps an excitation "
+                "parameter (amplitude, frequency) and reports the recovery response. The "
+                "parameter list and default grid follow the mode.",
+            ),
+        )
+        form.addRow(
+            t("Parameter"),
+            with_help(
+                self._parameter,
+                "Parameter",
+                "The parameter to sweep across the grid; the options depend on the mode "
+                "(design geometry vs excitation response).",
+            ),
+        )
+        self._grid_labels = {
+            "start": QLabel(t("start")),
+            "stop": QLabel(t("stop")),
+            "num": QLabel(t("num")),
+        }
         grid_row = QHBoxLayout()
-        for label, widget in (("start", self._start), ("stop", self._stop), ("num", self._num)):
-            grid_row.addWidget(QLabel(label))
+        for key, widget in (("start", self._start), ("stop", self._stop), ("num", self._num)):
+            grid_row.addWidget(self._grid_labels[key])
             grid_row.addWidget(widget)
         grid_row.addWidget(self._log)
         holder = QWidget()
         holder.setLayout(grid_row)
-        form.addRow("Grid", holder)
+        form.addRow(
+            t("Grid"),
+            with_help(
+                holder,
+                "Grid",
+                "The grid of values: start and stop bounds (in the parameter's SI unit), "
+                "num points, and log spacing (denser at small values). Log needs a "
+                "positive start.",
+            ),
+        )
         form.addRow(self._run)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(controls)
+        layout.addWidget(self._header)
+        layout.addWidget(self._controls)
         layout.addWidget(self._canvas, stretch=1)
 
         self._mode.currentTextChanged.connect(self._on_mode_changed)
         self._on_mode_changed(self._mode.currentText())
+
+    def retranslate(self) -> None:
+        """Refresh static text after a language change."""
+        self._header.retranslate()
+        self._controls.setTitle(t("Sweep"))
+        self._log.setText(t("log spacing"))
+        self._run.setText(t("Run sweep"))
+        for key, label in self._grid_labels.items():
+            label.setText(t(key))
+        self._canvas.retranslate()
 
     @staticmethod
     def _dspin(value: float, decimals: int) -> QDoubleSpinBox:
@@ -193,30 +272,81 @@ class MonteCarloPanel(QWidget):
         self._n_draws = QSpinBox()
         self._n_draws.setRange(2, 5000)
         self._n_draws.setValue(64)
-        self._cross_axis = QCheckBox("estimate cross-axis (slower)")
+        self._cross_axis = QCheckBox(t("estimate cross-axis (slower)"))
         self._tolerances = {key: QCheckBox(key) for key in _MC_DEFAULTS}
         for box in self._tolerances.values():
             box.setChecked(True)
-        self._run = QPushButton("Run Monte-Carlo")
+        self._run = QPushButton(t("Run Monte-Carlo"))
         self._run.clicked.connect(self.run_requested)
         self._canvas = MplFigureView("Run a Monte-Carlo to see the metric distribution.")
 
-        controls = QGroupBox("Monte-Carlo")
-        form = QFormLayout(controls)
-        form.addRow("Variant", self._variant)
-        form.addRow("Draws", self._n_draws)
-        form.addRow(self._cross_axis)
+        self._header = tab_header(
+            "Monte-Carlo",
+            "Tolerance Monte-Carlo: draw the tolerance parameters from their "
+            "distributions many times and plot the spread of the output metric, to "
+            "see robustness rather than a nominal value. Pick the variant, the draw "
+            "count, whether to estimate cross-axis (slower) and which tolerances to "
+            "include, then Run. The heavy run happens off the UI thread.",
+        )
+        self._controls = QGroupBox(t("Monte-Carlo"))
+        form = QFormLayout(self._controls)
+        form.addRow(
+            t("Variant"),
+            with_help(
+                self._variant,
+                "Variant",
+                "Which built-in composition (A-D) is the baseline; each draw perturbs it "
+                "by the selected tolerances.",
+            ),
+        )
+        form.addRow(
+            t("Draws"),
+            with_help(
+                self._n_draws,
+                "Draws",
+                "Number of Monte-Carlo draws. More draws tighten the estimated spread "
+                "but cost linearly more compute.",
+            ),
+        )
+        form.addRow(
+            with_help(
+                self._cross_axis,
+                "estimate cross-axis (slower)",
+                "Also estimate the cross-axis response for each draw (drives the "
+                "cross-axis sensitivity metric, doc 00). Roughly triples the per-draw "
+                "cost (extra off-axis excitations).",
+            )
+        )
         tol_box = QVBoxLayout()
         for box in self._tolerances.values():
             tol_box.addWidget(box)
         holder = QWidget()
         holder.setLayout(tol_box)
-        form.addRow("Tolerances", holder)
+        form.addRow(
+            t("Tolerances"),
+            with_help(
+                holder,
+                "Tolerances",
+                "Which parameters are drawn from their tolerance distributions each "
+                "run: q_total (lognormal, 30%), R_c (normal, 5%), gap (normal, 5 um), "
+                "bias (normal, 0.1 um), epsilon_x lateral offset (normal, 0.1 um). "
+                "Uncheck to hold a parameter fixed at nominal.",
+            ),
+        )
         form.addRow(self._run)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(controls)
+        layout.addWidget(self._header)
+        layout.addWidget(self._controls)
         layout.addWidget(self._canvas, stretch=1)
+
+    def retranslate(self) -> None:
+        """Refresh static text after a language change."""
+        self._header.retranslate()
+        self._controls.setTitle(t("Monte-Carlo"))
+        self._cross_axis.setText(t("estimate cross-axis (slower)"))
+        self._run.setText(t("Run Monte-Carlo"))
+        self._canvas.retranslate()
 
     def payload(self) -> dict[str, Any]:
         """Return the Monte-Carlo spec payload for ``build_monte_carlo_spec``."""

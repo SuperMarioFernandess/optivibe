@@ -14,7 +14,36 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolb
 from matplotlib.figure import Figure
 from PySide6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
-__all__ = ["MplFigureView"]
+from optivibe.gui.i18n import current_language, t
+
+__all__ = ["MplFigureView", "translate_figure"]
+
+
+def translate_figure(figure: Figure) -> Figure:
+    """Translate a figure's static axis/title/legend text into the active language.
+
+    ``viz/`` is Qt-free and language-agnostic (SW-09): it always emits English
+    labels. Rather than teach the core about languages, the GUI post-translates
+    the figure here via the same English-msgid catalog (:func:`t`) -- a no-op in
+    English. Pure-LaTeX/maths labels and data-bearing (formatted) titles are not
+    in the catalog and pass through unchanged.
+    """
+    if current_language() == "en":
+        return figure
+    for ax in figure.get_axes():
+        ax.set_xlabel(t(ax.get_xlabel()))
+        ax.set_ylabel(t(ax.get_ylabel()))
+        title = ax.get_title()
+        if title:
+            ax.set_title(t(title))
+        legend = ax.get_legend()
+        if legend is not None:
+            for entry in legend.get_texts():
+                entry.set_text(t(entry.get_text()))
+    suptitle = getattr(figure, "_suptitle", None)
+    if suptitle is not None:
+        suptitle.set_text(t(suptitle.get_text()))
+    return figure
 
 
 class MplFigureView(QWidget):
@@ -32,12 +61,17 @@ class MplFigureView(QWidget):
         super().__init__(parent)
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
-        self._placeholder = QLabel(placeholder)
+        self._placeholder_text = placeholder
+        self._placeholder = QLabel(t(placeholder))
         self._placeholder.setWordWrap(True)
         self._layout.addWidget(self._placeholder)
         self._canvas: FigureCanvasQTAgg | None = None
         self._toolbar: NavigationToolbar2QT | None = None
         self._figure: Figure | None = None
+
+    def retranslate(self) -> None:
+        """Refresh the placeholder text for the active language."""
+        self._placeholder.setText(t(self._placeholder_text))
 
     @property
     def figure(self) -> Figure | None:
@@ -52,6 +86,7 @@ class MplFigureView(QWidget):
         figure : matplotlib.figure.Figure
             A figure produced by :mod:`optivibe.viz` (Qt-free).
         """
+        translate_figure(figure)
         self._clear()
         self._placeholder.hide()
         canvas = FigureCanvasQTAgg(figure)

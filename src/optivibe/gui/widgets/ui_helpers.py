@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QHBoxLayout,
+    QLabel,
     QMessageBox,
     QScrollArea,
     QToolButton,
@@ -35,11 +36,16 @@ from PySide6.QtWidgets import (
 
 from optivibe.gui.i18n import t
 
-__all__ = ["install_wheel_guard", "with_help"]
+__all__ = ["install_wheel_guard", "tab_header", "with_help"]
 
 
 def _help_button(title: str, text: str, parent: QWidget) -> QToolButton:
-    """Build the faint ``?`` button that opens a reference note."""
+    """Build the faint ``?`` button that opens a reference note.
+
+    ``title``/``text`` are English msgids; they are translated *at click time*
+    via :func:`~optivibe.gui.i18n.t`, so the popup always follows the current
+    language with no retranslation bookkeeping.
+    """
     button = QToolButton(parent)
     button.setText("?")
     button.setAutoRaise(True)
@@ -50,8 +56,8 @@ def _help_button(title: str, text: str, parent: QWidget) -> QToolButton:
         "QToolButton {color: #9a9a9a; border: none; font-weight: bold;}"
         "QToolButton:hover {color: #303030;}"
     )
-    button.setToolTip("What is this parameter?")
-    button.clicked.connect(lambda: QMessageBox.information(parent, title, text))
+    button.setToolTip(t("What is this parameter?"))
+    button.clicked.connect(lambda: QMessageBox.information(parent, t(title), t(text)))
     return button
 
 
@@ -74,13 +80,48 @@ def with_help(widget: QWidget, title: str, text: str) -> QWidget:
         A container holding ``widget`` and the help button, suitable as a
         ``QFormLayout`` row field.
     """
+    resolved_title = t(title)
+    resolved_text = t(text)
+    # Populate the widget's What's-This so the Shift+F1 "?" mode surfaces the
+    # same help as the inline button (otherwise the mode has nothing to show).
+    widget.setWhatsThis(f"{resolved_title}\n\n{resolved_text}")
     holder = QWidget()
     row = QHBoxLayout(holder)
     row.setContentsMargins(0, 0, 0, 0)
     row.setSpacing(4)
     row.addWidget(widget, stretch=1)
-    row.addWidget(_help_button(t(title), t(text), holder))
+    # Pass the English msgids so the popup translates live at click time.
+    row.addWidget(_help_button(title, text, holder))
+    holder.setWhatsThis(f"{resolved_title}\n\n{resolved_text}")
     return holder
+
+
+class _TabHeader(QWidget):
+    """A tab description strip: a bold title plus a ``?`` note about the tab.
+
+    Stores the English msgids so :meth:`retranslate` can refresh the title after
+    a language switch; the ``?`` note translates at click time.
+    """
+
+    def __init__(self, title: str, about: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._title = title
+        self._label = QLabel(t(title))
+        self._label.setStyleSheet("font-weight: bold;")
+        row = QHBoxLayout(self)
+        row.setContentsMargins(2, 2, 2, 2)
+        row.addWidget(self._label)
+        row.addWidget(_help_button(title, about, self))
+        row.addStretch(1)
+
+    def retranslate(self) -> None:
+        """Refresh the title label in the current language."""
+        self._label.setText(t(self._title))
+
+
+def tab_header(title: str, about: str) -> _TabHeader:
+    """Build a tab-description header (bold title + ``?`` about-this-tab note)."""
+    return _TabHeader(title, about)
 
 
 class _WheelGuard(QObject):

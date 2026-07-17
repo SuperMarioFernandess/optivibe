@@ -157,9 +157,65 @@ def _e(en: str, ru: str) -> dict[str, str]:
 # The bilingual catalog. English values MUST stay byte-identical to the strings
 # they replaced (the frozen GUI tests assert several of them verbatim).
 # --------------------------------------------------------------------------- #
+_PHYSICS_NOTES_EN = """\
+<h3>Reference models for the current composition</h3>
+<p><b>Mechanics (docs 02 / 05).</b> The fiber cantilever is a clamped-free beam.
+The first bending mode sets f1 ~ 1/L^2; the lateral transfer is
+H_lat(f) = H_lat^QS * D(f) with single-mode amplification |D(f1)| = Q. Shorter L
+raises f1 and widens the flat band but lowers the quasi-static compliance
+(sensitivity) -- the core design trade shown by the f1(L) and |H_lat(f)| curves.</p>
+<p><b>Reflector coupling (doc 03).</b> eta(dx) is the Gaussian overlap between the
+returning beam and the fiber mode. The static de-centering Delta x0 sets the
+working point eta0 on the slope; cylinder/sphere are curved (finite R_c), the
+plane is flat (no displacement coupling) and the wedge adds an angular bias.</p>
+<p><b>Detector reference arm (doc 07 §1.2).</b> "matched" balances the bright and
+reference arms (common-mode RIN rejection limited by CMRR); "bright" leaves the
+reference arm dark (no RIN cancellation, higher shot floor). This is the open
+question O-SW-08.</p>
+<p><b>Inverse / DSP (docs 05 / 11).</b> The standard inverse de-rotates D(f),
+applies the calibrated optical sensitivity and integrates to v and x. The
+sensitivity model -- "static" (plateau slope), "operating_point" (local slope at
+eta0) or "nonlinear_curve" (full eta(dx) inversion) -- trades bias against
+robustness. The integrator runs in "frequency" (omega-domain) or "time" form.</p>
+<p><b>NEA(f) (docs 07 / 08).</b> The noise-equivalent acceleration density with
+its shot / RIN / Johnson plateaus is a measured budget; press
+<i>Compute NEA(f)</i> to run it through the worker (a Report run). The sensor
+<b>family</b> sweep is on the <i>Sweeps</i> tab.</p>
+"""
+
+_PHYSICS_NOTES_RU = """\
+<h3>Справочные модели текущей композиции</h3>
+<p><b>Механика (док 02 / 05).</b> Волоконная консоль — балка «заделка-свободный
+конец». Первая изгибная мода задаёт f1 ~ 1/L²; боковая передача
+H_lat(f) = H_lat^QS · D(f) с одномодовым усилением |D(f1)| = Q. Короче L —
+выше f1 и шире плоская полоса, но ниже квазистатическая податливость
+(чувствительность) — ключевой проектный компромисс, показываемый кривыми f1(L)
+и |H_lat(f)|.</p>
+<p><b>Связь отражателя (док 03).</b> η(dx) — гауссово перекрытие возвращённого
+пучка и моды волокна. Статическая расцентровка Δx0 задаёт рабочую точку η0 на
+склоне; cylinder/sphere кривые (конечный R_c), plane плоский (нет связи по
+смещению), wedge добавляет угловое смещение.</p>
+<p><b>Опорное плечо детектора (док 07 §1.2).</b> «matched» балансирует яркое и
+опорное плечи (синфазное подавление RIN ограничено CMRR); «bright» оставляет
+опорное плечо тёмным (нет подавления RIN, выше дробовой пол). Это открытый
+вопрос O-SW-08.</p>
+<p><b>Обратная цепочка / DSP (док 05 / 11).</b> Стандартная инверсия де-вращает
+D(f), применяет калиброванную оптическую чувствительность и интегрирует в v и x.
+Модель чувствительности — «static» (наклон плато), «operating_point» (локальный
+наклон в η0) или «nonlinear_curve» (полная инверсия η(dx)) — балансирует
+смещение против робастности. Интегратор работает в форме «frequency» (ω-область)
+или «time».</p>
+<p><b>NEA(f) (док 07 / 08).</b> Плотность шумо-эквивалентного ускорения с плато
+дробового / RIN / джонсоновского — измеренный бюджет; нажмите
+<i>Вычислить NEA(f)</i>, чтобы прогнать через воркер (прогон «Отчёт»). Развёртка
+<b>семейства</b> датчиков — на вкладке <i>Развёртки</i>.</p>
+"""
+
+
 CATALOG: dict[str, dict[str, str]] = {
     # ------------------------------------------------------------------ app
     "menu.export_dir": _e("Export to directory", "Экспорт в каталог"),
+    "help.tooltip": _e("What is this parameter?", "Что это за параметр?"),
     "app.title": _e(
         "OptiVibe - fiber-optic vibration sensor digital twin",
         "OptiVibe — цифровой двойник волоконно-оптического датчика вибрации",
@@ -234,6 +290,10 @@ CATALOG: dict[str, dict[str, str]] = {
     "menu.toggle_log": _e("Show log panel", "Показать панель журнала"),
     "menu.whats_this": _e("What's This? mode", "Режим «Что это?»"),
     "menu.manual": _e("Open manual", "Открыть руководство"),
+    "manual.not_found": _e(
+        "Documentation folder not found at:\n{path}",
+        "Каталог документации не найден по пути:\n{path}",
+    ),
     "menu.about": _e("About OptiVibe", "О программе OptiVibe"),
     "about.text": _e(
         "OptiVibe -- digital twin of a fiber-optic vibration sensor.\n"
@@ -1227,5 +1287,265 @@ CATALOG: dict[str, dict[str, str]] = {
         "Воспроизвести набор HDF5: путь набора внутри файла, индекс столбца для "
         "2-D данных, fs [Гц] (0 = взять атрибут fs из файла, если есть), единицы "
         "хранимых значений.",
+    ),
+    # ================================================================== #
+    # Matplotlib axis / title / legend labels (static; translated via t()
+    # in translate_figure). Pure-LaTeX and data-formatted labels are omitted.
+    # ================================================================== #
+    "ax.frequency_hz": _e("frequency [Hz]", "частота [Гц]"),
+    "ax.time_s": _e("time [s]", "время [с]"),
+    "ax.amplitude": _e("amplitude", "амплитуда"),
+    "ax.count": _e("count", "количество"),
+    "ax.distribution": _e("distribution", "распределение"),
+    "ax.a_ms2": _e("a [m/s^2]", "a [м/с²]"),
+    "ax.v_ms": _e("v [m/s]", "v [м/с]"),
+    "ax.x_m": _e("x [m]", "x [м]"),
+    "ax.true": _e("true", "истинное"),
+    "ax.recovered": _e("recovered", "восстановленное"),
+    "ax.true_a": _e("true a", "истинное a"),
+    "ax.recovered_a": _e("recovered a", "восстановленное a"),
+    "ax.total": _e("total", "суммарно"),
+    "ax.plateau_analytic": _e("plateau (analytic)", "плато (аналитика)"),
+    "ax.spectrogram": _e("spectrogram", "спектрограмма"),
+    "ax.acc_true_rec": _e(
+        "acceleration: true vs recovered", "ускорение: истинное vs восстановленное"
+    ),
+    "ax.recovered_kin": _e("recovered kinematics", "восстановленная кинематика"),
+    "ax.truth_vs_recovery": _e(
+        "truth vs recovery (target axis)", "истина vs восстановление (целевая ось)"
+    ),
+    "ax.residual": _e("residual [m/s$^2$]", "невязка [m/s$^2$]"),
+    "ax.cantilever_length_mm": _e("cantilever length L [mm]", "длина консоли L [мм]"),
+    "ax.first_mode_vs_length": _e("First bending mode vs length", "Первая изгибная мода от длины"),
+    "ax.lateral_transfer": _e(
+        "Lateral transfer function (current cantilever)",
+        "Боковая передаточная функция (текущая консоль)",
+    ),
+    "ax.spec_limit_50g": _e("50 g (spec limit)", "50 g (предел спец.)"),
+    "ax.nea_contribution": _e("NEA contribution [ug/sqrt(Hz)]", "вклад в NEA [мкg/√Гц]"),
+    "ax.nea_ug": _e("NEA [ug/sqrt(Hz)]", "NEA [мкg/√Гц]"),
+    "ax.noise_accel": _e("noise-equivalent acceleration", "шумо-эквивалентное ускорение"),
+    "ax.shot": _e("shot", "дробовой"),
+    "ax.rin": _e("rin", "RIN"),
+    "ax.johnson": _e("johnson", "джонсоновский"),
+    "ax.thermal": _e("thermal", "тепловой"),
+    "ax.samples": _e("samples", "отсчёты"),
+    # ================================================================== #
+    # Live tab
+    # ================================================================== #
+    "live.about": _e(
+        "Live view of the last run: the cantilever bend animation over "
+        "PyQtGraph panels for input-vs-recovered acceleration, the detector "
+        "signal, recovered velocity/displacement, the amplitude spectrum and "
+        "the NEA(f) density. The check-row shows/hides each panel (session "
+        "only); no controls here change the model -- edit on the left and Run.",
+        "Онлайн-вид последнего прогона: анимация изгиба консоли над панелями "
+        "PyQtGraph для ускорения вход-vs-восстановленное, сигнала детектора, "
+        "восстановленных скорости/смещения, амплитудного спектра и плотности "
+        "NEA(f). Ряд флажков показывает/скрывает панели (только сессия); контролы "
+        "здесь модель не меняют — правьте слева и жмите «Запуск».",
+    ),
+    "live.cantilever": _e("cantilever", "консоль"),
+    "live.panel.accel": _e("acceleration", "ускорение"),
+    "live.panel.det": _e("detector", "детектор"),
+    "live.panel.vel": _e("velocity", "скорость"),
+    "live.panel.disp": _e("displacement", "смещение"),
+    "live.panel.spec": _e("spectrum", "спектр"),
+    "live.panel.nea": _e("NEA(f)", "NEA(f)"),
+    "live.title.accel": _e(
+        "Acceleration: input vs recovered", "Ускорение: вход vs восстановленное"
+    ),
+    "live.title.det": _e("Detector signal", "Сигнал детектора"),
+    "live.title.vel": _e("Recovered velocity", "Восстановленная скорость"),
+    "live.title.disp": _e("Recovered displacement", "Восстановленное смещение"),
+    "live.title.spec": _e("Recovered amplitude spectrum", "Восстановленный амплитудный спектр"),
+    "live.title.nea_prompt": _e(
+        "NEA(f) - run Report for the budget", "NEA(f) — запустите «Отчёт» для бюджета"
+    ),
+    "live.title.nea_na": _e(
+        "NEA(f) - not available (use the photodiode detector)",
+        "NEA(f) — недоступно (нужен фотодиодный детектор)",
+    ),
+    "live.title.nea_ok": _e(
+        "NEA(f) with shot / RIN / Johnson / thermal plateaus",
+        "NEA(f) с плато дробового / RIN / джонсоновского / теплового",
+    ),
+    "live.axis.input": _e("input", "вход"),
+    # ================================================================== #
+    # Report tab
+    # ================================================================== #
+    "report.about": _e(
+        "Display-only report of the last Run: the truth-vs-recovery a/v/x "
+        "figure, the NEA(f) budget (needs the photodiode detector) and the "
+        "recovered-acceleration spectrogram, plus the error-budget summary "
+        "(amplitude ratio, recovery error). Press Report on the left to build it.",
+        "Отчёт (только просмотр) последнего прогона: график истина-vs-"
+        "восстановление a/v/x, бюджет NEA(f) (нужен фотодиодный детектор) и "
+        "спектрограмма восстановленного ускорения, плюс сводка бюджета ошибок "
+        "(отношение амплитуд, ошибка восстановления). Жмите «Отчёт» слева.",
+    ),
+    "report.tab.truth": _e("Truth vs recovery", "Истина vs восстановление"),
+    "report.tab.nea": _e("NEA budget", "Бюджет NEA"),
+    "report.tab.spectrogram": _e("Spectrogram", "Спектрограмма"),
+    "report.error_budget": _e("Error budget", "Бюджет ошибок"),
+    "report.ph.truth": _e(
+        "Run 'Report' to build the truth-vs-recovery figure.",
+        "Запустите «Отчёт», чтобы построить график истина-vs-восстановление.",
+    ),
+    "report.ph.nea": _e(
+        "NEA budget (needs the photodiode detector).",
+        "Бюджет NEA (нужен фотодиодный детектор).",
+    ),
+    "report.ph.spectrogram": _e(
+        "Recovered-acceleration spectrogram.",
+        "Спектрограмма восстановленного ускорения.",
+    ),
+    # ================================================================== #
+    # Sweeps tab
+    # ================================================================== #
+    "sweep.about": _e(
+        "Sweep one parameter across a grid and plot the resulting NEA / "
+        "response, to see a trend rather than a single point. Pick the variant, "
+        "the mode (design geometry vs excitation response), the parameter, the "
+        "start/stop/count grid and linear/log spacing, then Run sweep. The heavy "
+        "run happens off the UI thread.",
+        "Развернуть один параметр по сетке и построить NEA / отклик, чтобы "
+        "увидеть тренд, а не одну точку. Выберите вариант, режим (геометрия "
+        "design vs отклик response), параметр, сетку старт/стоп/число и линейный/"
+        "лог шаг, затем «Запустить развёртку». Тяжёлый прогон идёт вне UI-потока.",
+    ),
+    "sweep.group": _e("Sweep", "Развёртка"),
+    "sweep.variant.label": _e("Variant", "Вариант"),
+    "sweep.variant.help": _e(
+        "Which built-in composition (A-D) is the baseline for the sweep; every "
+        "grid point starts from it and overrides the swept parameter.",
+        "Какая встроенная композиция (A–D) — базовая для развёртки; каждая точка "
+        "сетки стартует из неё и переопределяет разворачиваемый параметр.",
+    ),
+    "sweep.mode.label": _e("Mode", "Режим"),
+    "sweep.mode.help": _e(
+        "'design' sweeps a geometry/design parameter (length, R_c, power, bias, "
+        "full-scale) and reports the NEA trend; 'response' sweeps an excitation "
+        "parameter (amplitude, frequency) and reports the recovery response. The "
+        "parameter list and default grid follow the mode.",
+        "«design» разворачивает геометрический/проектный параметр (длина, R_c, "
+        "мощность, смещение, полная шкала) и показывает тренд NEA; «response» "
+        "разворачивает параметр возбуждения (амплитуда, частота) и показывает "
+        "отклик восстановления. Список параметров и сетка по умолчанию зависят от "
+        "режима.",
+    ),
+    "sweep.parameter.label": _e("Parameter", "Параметр"),
+    "sweep.parameter.help": _e(
+        "The parameter to sweep across the grid; the options depend on the mode "
+        "(design geometry vs excitation response).",
+        "Параметр для развёртки по сетке; варианты зависят от режима (геометрия "
+        "design vs отклик response).",
+    ),
+    "sweep.grid.label": _e("Grid", "Сетка"),
+    "sweep.grid.help": _e(
+        "The grid of values: start and stop bounds (in the parameter's SI unit), "
+        "num points, and log spacing (denser at small values). Log needs a "
+        "positive start.",
+        "Сетка значений: границы start и stop (в СИ-единице параметра), число "
+        "точек num и лог-шаг (плотнее при малых значениях). Лог требует "
+        "положительного start.",
+    ),
+    "sweep.start": _e("start", "старт"),
+    "sweep.stop": _e("stop", "стоп"),
+    "sweep.num": _e("num", "число"),
+    "sweep.log": _e("log spacing", "лог-шаг"),
+    "sweep.run": _e("Run sweep", "Запустить развёртку"),
+    "sweep.ph": _e(
+        "Run a sweep to see NEA / response vs the parameter.",
+        "Запустите развёртку, чтобы увидеть NEA / отклик от параметра.",
+    ),
+    # ================================================================== #
+    # Monte-Carlo tab
+    # ================================================================== #
+    "mc.about": _e(
+        "Tolerance Monte-Carlo: draw the tolerance parameters from their "
+        "distributions many times and plot the spread of the output metric, to "
+        "see robustness rather than a nominal value. Pick the variant, the draw "
+        "count, whether to estimate cross-axis (slower) and which tolerances to "
+        "include, then Run. The heavy run happens off the UI thread.",
+        "Монте-Карло по допускам: многократно разыгрывает параметры допусков из "
+        "их распределений и строит разброс выходной метрики — чтобы увидеть "
+        "робастность, а не номинал. Выберите вариант, число реализаций, оценивать "
+        "ли перекрёстную ось (медленнее) и какие допуски включить, затем "
+        "«Запуск». Тяжёлый прогон идёт вне UI-потока.",
+    ),
+    "mc.group": _e("Monte-Carlo", "Монте-Карло"),
+    "mc.variant.label": _e("Variant", "Вариант"),
+    "mc.variant.help": _e(
+        "Which built-in composition (A-D) is the baseline; each draw perturbs it "
+        "by the selected tolerances.",
+        "Какая встроенная композиция (A–D) — базовая; каждая реализация возмущает "
+        "её выбранными допусками.",
+    ),
+    "mc.draws.label": _e("Draws", "Реализации"),
+    "mc.draws.help": _e(
+        "Number of Monte-Carlo draws. More draws tighten the estimated spread "
+        "but cost linearly more compute.",
+        "Число реализаций Монте-Карло. Больше реализаций — точнее оценка "
+        "разброса, но линейно дороже по вычислениям.",
+    ),
+    "mc.cross_axis": _e("estimate cross-axis (slower)", "оценивать перекрёстную ось (медленнее)"),
+    "mc.cross_axis.help": _e(
+        "Also estimate the cross-axis response for each draw (drives the "
+        "cross-axis sensitivity metric, doc 00). Roughly triples the per-draw "
+        "cost (extra off-axis excitations).",
+        "Дополнительно оценивать перекрёстный отклик для каждой реализации "
+        "(метрика перекрёстной чувствительности, док 00). Примерно утраивает "
+        "стоимость реализации (доп. внеосевые возбуждения).",
+    ),
+    "mc.tolerances.label": _e("Tolerances", "Допуски"),
+    "mc.tolerances.help": _e(
+        "Which parameters are drawn from their tolerance distributions each "
+        "run: q_total (lognormal, 30%), R_c (normal, 5%), gap (normal, 5 um), "
+        "bias (normal, 0.1 um), epsilon_x lateral offset (normal, 0.1 um). "
+        "Uncheck to hold a parameter fixed at nominal.",
+        "Какие параметры разыгрываются из распределений допусков в каждом "
+        "прогоне: q_total (логнормальное, 30%), R_c (нормальное, 5%), зазор "
+        "(нормальное, 5 мкм), смещение (нормальное, 0.1 мкм), боковой сдвиг "
+        "epsilon_x (нормальное, 0.1 мкм). Снимите флажок, чтобы держать параметр "
+        "на номинале.",
+    ),
+    "mc.run": _e("Run Monte-Carlo", "Запустить Монте-Карло"),
+    "mc.ph": _e(
+        "Run a Monte-Carlo to see the metric distribution.",
+        "Запустите Монте-Карло, чтобы увидеть распределение метрики.",
+    ),
+    # ================================================================== #
+    # Physics tab
+    # ================================================================== #
+    "physics.about": _e(
+        "Reference design curves for the current composition, so you can see "
+        "where your edits land before running: f1(L), the lateral transfer "
+        "|H_lat(f)| and the coupling eta(dx) are light and rebuilt by Refresh; "
+        "the measured NEA(f) budget is heavy and runs via Compute NEA(f) (a "
+        "Report off the UI thread). The Reference notes tab explains the models.",
+        "Справочные проектные кривые текущей композиции — чтобы видеть, куда "
+        "попадают правки до прогона: f1(L), боковая передача |H_lat(f)| и связь "
+        "η(dx) лёгкие и пересобираются кнопкой «Обновить»; измеренный бюджет "
+        "NEA(f) тяжёлый и считается по «Вычислить NEA(f)» (Отчёт вне UI-потока). "
+        "Вкладка «Справочные заметки» поясняет модели.",
+    ),
+    "physics.tab.curves": _e("Design curves", "Проектные кривые"),
+    "physics.tab.notes": _e("Reference notes", "Справочные заметки"),
+    "physics.refresh": _e("Refresh from composition", "Обновить из композиции"),
+    "physics.nea": _e("Compute NEA(f)", "Вычислить NEA(f)"),
+    "physics.ph.f1": _e("Press Refresh to build f1(L).", "Нажмите «Обновить» для f1(L)."),
+    "physics.ph.hlat": _e(
+        "Press Refresh to build |H_lat(f)|.", "Нажмите «Обновить» для |H_lat(f)|."
+    ),
+    "physics.ph.eta": _e("Press Refresh to build eta(dx).", "Нажмите «Обновить» для η(dx)."),
+    "physics.ph.nea": _e(
+        "Press Compute NEA(f) to run the budget.",
+        "Нажмите «Вычислить NEA(f)» для бюджета.",
+    ),
+    # Reference notes (HTML). English kept byte-identical to the module block.
+    "physics.notes.html": _e(
+        _PHYSICS_NOTES_EN,
+        _PHYSICS_NOTES_RU,
     ),
 }

@@ -422,6 +422,8 @@ class MainWindow(QMainWindow):
         self._physics = new_physics
         self._tabs.addTab(self._physics, t("Physics"))
 
+        for panel in (self._live, self._report, self._sweep, self._monte):
+            panel.retranslate()
         self._retranslate_chrome()
         self._tabs.setCurrentIndex(current_tab)
 
@@ -446,12 +448,17 @@ class MainWindow(QMainWindow):
         QWhatsThis.enterWhatsThisMode()
 
     def _open_manual(self) -> None:
-        """Open the local documentation directory, if present."""
+        """Open the project documentation folder (``<repo>/docs``).
+
+        Resolves ``docs`` relative to the source tree (editable install). If it
+        is not found next to the package (e.g. a wheel install), the resolved
+        path is shown so the user knows where to look.
+        """
         docs = Path(__file__).resolve().parents[3] / "docs"
         if docs.is_dir():
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(docs)))
         else:
-            QMessageBox.information(self, tr("menu.manual"), str(docs))
+            QMessageBox.information(self, tr("menu.manual"), tr("manual.not_found", path=str(docs)))
 
     def _on_about(self) -> None:
         """Show the About box."""
