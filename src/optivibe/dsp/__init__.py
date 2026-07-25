@@ -73,6 +73,12 @@ from optivibe.dsp.spectra import (
     welch_psd,
 )
 from optivibe.dsp.standard import StandardDsp
+from optivibe.dsp.streaming import (
+    LeakyIntegrator,
+    StreamingDsp,
+    StreamingSpectrum,
+    replay_record,
+)
 from optivibe.dsp.stub import StubDsp
 
 DSP_REGISTRY: Registry[DspStage] = Registry("dsp")
@@ -85,6 +91,7 @@ __all__ = [
     "DSP_REGISTRY",
     "INTEGRATOR_REGISTRY",
     "SENSITIVITY_REGISTRY",
+    "LeakyIntegrator",
     "MeasuredSensitivity",
     "NeaResult",
     "NonlinearCurveSensitivity",
@@ -93,6 +100,8 @@ __all__ = [
     "SensitivityModel",
     "StandardDsp",
     "StaticSensitivity",
+    "StreamingDsp",
+    "StreamingSpectrum",
     "StubDsp",
     "TipPoint",
     "amplitude_spectrum",
@@ -113,6 +122,7 @@ __all__ = [
     "nea_from_psd",
     "nea_spectrum",
     "recover_acceleration_3d",
+    "replay_record",
     "rms",
     "second_harmonic_ratio",
     "spectrogram",

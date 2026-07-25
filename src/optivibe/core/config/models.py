@@ -727,6 +727,14 @@ class DspOptions(_Frozen):
     f_hp_hz : float or None
         High-pass cut-off for the integrators, Hz; ``None`` uses the variant's
         lower band edge (doc 08). Removes the double-integration drift.
+    f_c_stream : float or None
+        Causal streaming high-pass / leak cut-off for the S-03 real-time layer
+        (:class:`~optivibe.dsp.streaming.LeakyIntegrator`), Hz; ``None`` falls
+        back to ``f_hp`` (the variant band edge). Deliberately **independent** of
+        the batch ``f_hp_hz`` (doc 06 §9.3-2): the causal high-pass and the batch
+        zero-phase mask behave differently at the low-frequency edge, so a
+        separate knob tunes the streaming-vs-batch in-band agreement without
+        touching the batch path. Unused by the batch chain.
     welch_nperseg : int or None
         Welch segment length; ``None`` lets the estimator choose from the record
         length.
@@ -760,6 +768,11 @@ class DspOptions(_Frozen):
     spectrum_method: Literal["fft", "welch"] = "fft"
     window: str = "hann"
     f_hp_hz: float | None = Field(default=None, gt=0.0, description="HP cut-off, Hz (band if None)")
+    f_c_stream: float | None = Field(
+        default=None,
+        gt=0.0,
+        description="Causal streaming HP/leak cut-off, Hz (S-03; f_hp if None)",
+    )
     welch_nperseg: int | None = Field(default=None, gt=0, description="Welch segment length")
     welch_noverlap: int | None = Field(default=None, ge=0, description="Welch segment overlap")
     calibration: Literal["ideal", "bench"] = "ideal"
