@@ -396,9 +396,10 @@ class _ExcitationBase(_Frozen):
     """Fields shared by every excitation spec.
 
     The signal is generated on (or mapped to) the single axis ``axis``; the two
-    remaining axes are zero. Different per-axis signals are a planned extension
-    (a future composite kind), kept out of v-S1 so the default semantics of
-    ``axis`` stay unchanged (task S1; doc 11 §2.1).
+    remaining axes are zero (task S1; doc 11 §2.1). Different per-axis signals
+    were deferred here until S-21: :class:`CompositeSpec` gives every component
+    its own ``axis`` and sums the parts per axis, so a run may now drive several
+    axes at once without changing the semantics of ``axis`` for a single kind.
     """
 
     axis: Literal["x", "y", "z"] = "x"
@@ -411,12 +412,104 @@ class _GeneratedBase(_ExcitationBase):
     duration_s: float = Field(gt=0.0, description="Signal duration, s")
 
 
+class _ModulationBase(_Frozen):
+    """Fields shared by the AM/FM modulators of a sine carrier (doc 11 §2.1.3).
+
+    Attributes
+    ----------
+    f_m_hz : float
+        Modulating frequency ``f_m``, Hz.
+    phase_rad : float
+        Initial phase ``phi_m`` of the modulating wave, rad.
+    """
+
+    f_m_hz: float = Field(gt=0.0, description="Modulating frequency f_m, Hz")
+    phase_rad: float = Field(default=0.0, description="Modulating-wave phase phi_m, rad")
+
+
+class AmModulation(_ModulationBase):
+    """Amplitude modulation of a sine carrier (doc 11 §2.1.3).
+
+    ``a(t) = a_c [1 + m cos(2 pi f_m t + phi_m)] sin(2 pi f_c t + phi_c)``, which
+    puts two sidebands of amplitude ``m a_c / 2`` at ``f_c +- f_m``.
+
+    Attributes
+    ----------
+    depth : float
+        Modulation depth ``m``, dimensionless, ``0 <= m <= 1``. Note the naming:
+        a trailing ``_m`` means *metres* in this repository (``length_m``), so
+        the dimensionless depth carries no unit suffix.
+    """
+
+    kind: Literal["am"] = "am"
+    depth: float = Field(ge=0.0, description="AM depth m, dimensionless (0..1)")
+
+    @model_validator(mode="after")
+    def _check_depth(self) -> AmModulation:
+        if self.depth > 1.0:
+            msg = (
+                f"AM depth m must satisfy 0 <= m <= 1, got {self.depth}. Over-modulation "
+                "(m > 1) is excluded by doc 11 §2.1.3: the envelope changes sign and m "
+                "stops being an amplitude ratio. The same waveform is expressible exactly "
+                "as a 'composite' of three sine components (carrier a_c at f_c plus two "
+                "sidebands m*a_c/2 at f_c +- f_m)."
+            )
+            raise ValueError(msg)
+        return self
+
+
+class FmModulation(_ModulationBase):
+    """Frequency modulation of a sine carrier (doc 11 §2.1.3).
+
+    ``a(t) = a_c sin(2 pi f_c t + beta sin(2 pi f_m t + phi_m) + phi_c)`` with the
+    modulation index ``beta = deviation_hz / f_m_hz``; the spectrum is the Bessel
+    family ``a_c |J_k(beta)|`` at ``f_c +- k f_m``.
+
+    Attributes
+    ----------
+    deviation_hz : float
+        Frequency deviation ``Delta f``, Hz.
+    """
+
+    kind: Literal["fm"] = "fm"
+    deviation_hz: float = Field(ge=0.0, description="Frequency deviation Delta f, Hz")
+
+    @property
+    def beta(self) -> float:
+        """Modulation index ``beta_FM = Delta f / f_m``, dimensionless (doc 01 §3.5)."""
+        return self.deviation_hz / self.f_m_hz
+
+
+Modulation = Annotated[AmModulation | FmModulation, Field(discriminator="kind")]
+"""Discriminated union of the carrier modulators, selected by ``kind`` (S-21)."""
+
+
 class SineSpec(_GeneratedBase):
-    """Single-tone sine excitation (the S0 acceptance signal)."""
+    """Single-tone sine excitation (the S0 acceptance signal), optionally modulated.
+
+    Attributes
+    ----------
+    frequency_hz : float
+        Carrier frequency ``f_c``, Hz.
+    amplitude_g : float
+        Carrier amplitude ``a_c``, g.
+    phase_rad : float
+        Carrier initial phase ``phi_c``, rad. Added in S-21 so the sine matches
+        the ``Tone`` of :class:`MultitoneSpec`, which has carried a phase since
+        S1; the default ``0.0`` reproduces the previous waveform bit-for-bit.
+    modulation : AmModulation or FmModulation or None
+        Optional AM/FM of this carrier (doc 11 §2.1.3). Strictly opt-in: ``None``
+        takes the unmodulated code path, so every pre-S-21 scenario is unchanged
+        to the bit.
+    """
 
     kind: Literal["sine"] = "sine"
-    frequency_hz: float = Field(gt=0.0, description="Sine frequency, Hz")
-    amplitude_g: float = Field(gt=0.0, description="Sine amplitude, g")
+    frequency_hz: float = Field(gt=0.0, description="Carrier frequency f_c, Hz")
+    amplitude_g: float = Field(gt=0.0, description="Carrier amplitude a_c, g")
+    phase_rad: float = Field(default=0.0, description="Carrier initial phase phi_c, rad")
+    modulation: Modulation | None = Field(
+        default=None, description="Optional AM/FM of the carrier (doc 11 §2.1.3)"
+    )
 
 
 class Tone(_Frozen):
@@ -475,6 +568,14 @@ class RandomSpec(_GeneratedBase):
         default=None, gt=0.0, description="Target one-sided PSD level, g^2/Hz"
     )
     shape: Literal["flat"] = "flat"
+    seed: int | None = Field(
+        default=None,
+        description=(
+            "Explicit noise-stream seed; overrides the scenario seed (and, inside a "
+            "'composite', the position-derived sub-seed) so this realization is pinned "
+            "irrespective of where the component sits (doc 11 §2.1.5). None = inherit."
+        ),
+    )
 
     @model_validator(mode="after")
     def _check(self) -> RandomSpec:
@@ -509,6 +610,91 @@ class ShockSpec(_GeneratedBase):
             )
             raise ValueError(msg)
         return self
+
+
+CompositeComponentSpec = Annotated[
+    SineSpec | MultitoneSpec | SweepSpec | RandomSpec | ShockSpec,
+    Field(discriminator="kind"),
+]
+"""Specs admissible as a component of :class:`CompositeSpec` (doc 11 §2.1.4).
+
+Generated kinds only: the file-replay kinds take their rate and length from the
+record, which would contradict the composite's single sampling grid, and a
+composite is not admissible inside a composite (no recursion in v1).
+"""
+
+
+class CompositeSpec(_GeneratedBase):
+    """Sum of several excitation components on one sampling grid (doc 11 §2.1.4).
+
+    ``a(t) = sum_i a_i(t)`` with **no renormalization**: every component keeps
+    the level it declares, so the composite RMS follows from the components in
+    closed form (power addition for disjoint spectral supports, doc 11 §2.1.4)
+    and a Parseval check has something to check against.
+
+    The sampling grid lives on the composite alone: ``fs_hz`` / ``duration_s``
+    (and, unless a component states its own, ``axis``) are injected into the
+    components at validation time, and a component that states a *different*
+    grid fails loudly (10 §7). Each component may name its own ``axis``, so a
+    run can drive several axes at once -- the extension deferred on
+    :class:`_ExcitationBase` since S1.
+
+    Attributes
+    ----------
+    components : tuple of CompositeComponentSpec
+        The summed parts, in declaration order. The order is part of the
+        contract: it fixes the noise sub-seeds (doc 11 §2.1.5).
+    """
+
+    kind: Literal["composite"] = "composite"
+    components: tuple[CompositeComponentSpec, ...] = Field(
+        min_length=1, description="Summed components (generated kinds only)"
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _inject_grid(cls, value: object) -> object:
+        """Push the composite grid/axis into mapping-form components.
+
+        Runs on the mapping (YAML) form only: a component supplied as an
+        already-built spec object carries its own resolved fields, which are
+        checked for consistency but never rewritten.
+        """
+        if not isinstance(value, dict):
+            return value
+        components = value.get("components")
+        if not isinstance(components, (list, tuple)):
+            return value
+        grid = {key: value.get(key) for key in ("fs_hz", "duration_s")}
+        resolved: list[object] = []
+        for index, component in enumerate(components):
+            if isinstance(component, dict):
+                item = dict(component)
+                for key, shared in grid.items():
+                    if shared is not None:
+                        item.setdefault(key, shared)
+                if "axis" in value:
+                    item.setdefault("axis", value["axis"])
+                resolved.append(item)
+            else:
+                resolved.append(component)
+            _check_component_grid(resolved[index], index, grid)
+        return {**value, "components": resolved}
+
+
+def _check_component_grid(component: object, index: int, grid: dict[str, object]) -> None:
+    """Fail loudly when a composite component contradicts the composite grid."""
+    for key, shared in grid.items():
+        if shared is None:
+            continue
+        own = component.get(key) if isinstance(component, dict) else getattr(component, key, None)
+        if own is not None and own != shared:
+            msg = (
+                f"composite component {index} sets {key}={own}, which contradicts the "
+                f"composite grid {key}={shared}; the sampling grid is defined once, on "
+                "the composite (doc 11 §2.1.4)"
+            )
+            raise ValueError(msg)
 
 
 class CsvSpec(_ExcitationBase):
@@ -691,6 +877,7 @@ ExcitationSpec = Annotated[
     | SweepSpec
     | RandomSpec
     | ShockSpec
+    | CompositeSpec
     | CsvSpec
     | WavSpec
     | TdmsSpec
@@ -705,7 +892,9 @@ The S0 form ``ExcitationSpec(kind="sine", ...)`` maps one-to-one onto
 :class:`SineSpec`, so existing scenarios (``examples/hello.yaml``) parse
 unchanged. S1 added CSV/WAV replay; S8 adds the instrument formats
 (:class:`TdmsSpec`, :class:`UffSpec`, :class:`MatSpec`, :class:`Hdf5Spec`)
-behind the same loader registry (seam SW-08).
+behind the same loader registry (seam SW-08); S-21 adds
+:class:`CompositeSpec` (sum of components) and the opt-in
+``SineSpec.modulation`` (AM/FM sidebands).
 """
 
 

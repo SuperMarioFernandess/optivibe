@@ -76,7 +76,10 @@ class RandomExcitationSource:
             assert spec.g_rms is not None
             psd_si = (spec.g_rms * G0_M_S2) ** 2 / bandwidth
 
-        rng = np.random.default_rng(seed)
+        # An explicit spec-level seed pins this realization irrespective of the
+        # caller (used to make a composite component position-independent, doc
+        # 11 §2.1.5); None keeps the pre-S-21 behaviour bit-for-bit.
+        rng = np.random.default_rng(spec.seed if spec.seed is not None else seed)
         sigma = np.sqrt(psd_si * spec.fs_hz * n) / 2.0
         spectrum = np.zeros(freqs.size, dtype=np.complex128)
         spectrum[mask] = sigma * (rng.standard_normal(n_bins) + 1j * rng.standard_normal(n_bins))
@@ -96,4 +99,6 @@ class RandomExcitationSource:
             "shape": spec.shape,
             "n_band_bins": n_bins,
         }
-        return pack_on_axis(wave, spec.axis, spec.fs_hz, seed, meta)
+        return pack_on_axis(
+            wave, spec.axis, spec.fs_hz, spec.seed if spec.seed is not None else seed, meta
+        )

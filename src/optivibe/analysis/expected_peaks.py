@@ -28,12 +28,12 @@ Taxonomy (open, doc 13)
 :data:`PEAK_PREDICTOR_REGISTRY` (the doc 09 §6 registry pattern). Implemented
 here: ``"mode"`` (the cantilever resonance ``f1`` and its ``f1/Q`` band, docs 02
 §2 / 07 §2.3), ``"harmonic"`` (``k*f`` of the drive tones from the optical
-nonlinearity ``eta(x)``, doc 03 §e) and ``"intermod"`` (``f_i +- f_j``
-positions). Declared but deliberately **empty** branches: ``"sideband"``
-(AM/FM ``f_c +- k*f_m`` -- lands with the S-21 synthesizer), ``"mains"``
-(``50*k`` Hz), ``"alias"`` and ``"f_mount"``. Asking for an unimplemented kind
-yields no peaks rather than an error, so a caller may always request the whole
-taxonomy.
+nonlinearity ``eta(x)``, doc 03 §e), ``"intermod"`` (``f_i +- f_j`` positions)
+and ``"sideband"`` (AM/FM ``f_c +- k*f_m`` of a modulated carrier, doc 11
+§2.1.3; filled by S-21). Declared but deliberately **empty** branches:
+``"mains"`` (``50*k`` Hz), ``"alias"`` and ``"f_mount"``. Asking for an
+unimplemented kind yields no peaks rather than an error, so a caller may always
+request the whole taxonomy.
 
 Significance threshold
 ----------------------
@@ -52,8 +52,20 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
+from scipy.special import jv
+
 from optivibe.core.config.loader import load_constants
-from optivibe.core.config.models import Constants, ScenarioConfig, VariantConfig
+from optivibe.core.config.models import (
+    AmModulation,
+    CompositeSpec,
+    Constants,
+    ExcitationSpec,
+    FmModulation,
+    MultitoneSpec,
+    ScenarioConfig,
+    SineSpec,
+    VariantConfig,
+)
 from optivibe.core.registry import Registry
 from optivibe.detector.photodiode import noise_psd
 from optivibe.dsp.calibration import target_sensitivity
@@ -64,6 +76,7 @@ from optivibe.optics.reflector import ReflectorModel, build_reflector_model
 __all__ = [
     "PEAK_KINDS",
     "PEAK_PREDICTOR_REGISTRY",
+    "Carrier",
     "ExpectedPeak",
     "ExpectedPeaks",
     "PeakKind",
@@ -97,6 +110,17 @@ DEFAULT_SIGMA_FACTOR = 3.0
 #: Central-difference step for the ``eta`` derivatives, m (doc 03 §e; the same
 #: 1 nm step as the repository golden ``test_golden_thd_...``).
 _ETA_STEP_M = 1.0e-9
+
+#: Numerical loop bound for the FM sideband family: orders this far above the
+#: Carson estimate ``beta + 1`` have ``|J_k(beta)|`` many orders of magnitude
+#: below any threshold (for ``beta = 5``, ``J_17 ~ 1.6e-8``). It is a guard, not
+#: the emission criterion -- which line is emitted is decided by the NEA
+#: threshold alone (doc 13, coordination of the S-21 specification).
+_FM_ORDER_MARGIN = 12
+
+#: Hard cap on the FM order loop for pathological ``beta`` (wide deviation, low
+#: ``f_m``); the Nyquist test usually bites long before this.
+_FM_ORDER_CAP = 512
 
 
 @dataclass(frozen=True)
@@ -227,6 +251,31 @@ class ExpectedPeaks:
 
 
 @dataclass(frozen=True)
+class Carrier:
+    """One modulated carrier of the stimulus (doc 11 §2.1.3).
+
+    Attributes
+    ----------
+    freq_hz : float
+        Carrier frequency ``f_c``, Hz.
+    amplitude_m_s2 : float
+        Carrier line amplitude ``a_c``, m/s^2 -- for FM this is already the
+        Bessel-reduced ``a_c |J_0(beta)|``, i.e. what the carrier line actually
+        holds, not the nominal drive amplitude.
+    modulation : AmModulation or FmModulation
+        The modulator, which fixes the sideband family.
+    drive_m_s2 : float
+        Nominal (pre-modulation) amplitude ``a_c``, m/s^2 -- the reference the
+        sideband amplitudes are built from.
+    """
+
+    freq_hz: float
+    amplitude_m_s2: float
+    modulation: AmModulation | FmModulation
+    drive_m_s2: float
+
+
+@dataclass(frozen=True)
 class PredictionContext:
     """Everything a predictor needs, resolved once from the configuration.
 
@@ -243,6 +292,9 @@ class PredictionContext:
     tones : tuple of tuple of float
         Drive tones as ``(frequency_hz, amplitude_m_s2)``; empty for stimuli
         with no closed-form line list (random / sweep / shock / file replay).
+    carriers : tuple of Carrier
+        Modulated carriers of the stimulus; empty unless a ``sine`` (possibly
+        inside a ``composite``) carries a ``modulation``.
     resolution_hz : float or None
         Amplitude-spectrum bin width, Hz.
     nyquist_hz : float or None
@@ -266,6 +318,7 @@ class PredictionContext:
     constants: Constants
     cantilever: CantileverModel
     tones: tuple[tuple[float, float], ...]
+    carriers: tuple[Carrier, ...]
     resolution_hz: float | None
     nyquist_hz: float | None
     current_psd_a2_hz: float
@@ -457,24 +510,75 @@ def _optics_model(variant: VariantConfig, scenario: ScenarioConfig) -> Reflector
 
 
 def _drive_tones(scenario: ScenarioConfig, constants: Constants) -> tuple[tuple[float, float], ...]:
-    """Drive tones as ``(frequency_hz, amplitude_m_s2)`` (doc 11 §2).
+    """Drive tones as ``(frequency_hz, amplitude_m_s2)`` (doc 11 §2.1).
 
-    Only the stimuli with a closed-form line list contribute: ``sine`` and
-    ``multitone``. ``sweep`` / ``random`` / ``shock`` and the file-replay kinds
-    have no fixed tone set, so they yield an empty tuple -- the harmonic branch
-    then predicts nothing rather than guessing.
+    Only the stimuli with a closed-form line list contribute: ``sine``,
+    ``multitone`` and a ``composite`` of those (S-21). ``sweep`` / ``random`` /
+    ``shock`` and the file-replay kinds have no fixed tone set, so they yield an
+    empty tuple -- the harmonic branch then predicts nothing rather than
+    guessing.
+
+    A modulated carrier contributes the amplitude its *carrier line* actually
+    holds: ``a_c`` under AM, ``a_c |J_0(beta)|`` under FM (doc 11 §2.1.3), so
+    the harmonic branch is fed the real fundamental rather than the nominal
+    drive.
     """
     spec = scenario.excitation
     g0 = constants.universal.g0_m_s2
-    kind = getattr(spec, "kind", "")
-    if kind == "sine":
-        return ((float(spec.frequency_hz), float(spec.amplitude_g) * g0),)  # type: ignore[union-attr]
-    if kind == "multitone":
+    if isinstance(spec, CompositeSpec):
+        tones: list[tuple[float, float]] = []
+        for component in spec.components:
+            tones.extend(_component_tones(component, g0))
+        return tuple(tones)
+    return _component_tones(spec, g0)
+
+
+def _component_tones(spec: ExcitationSpec, g0: float) -> tuple[tuple[float, float], ...]:
+    """Drive tones of one spec (no recursion needed: composites do not nest)."""
+    if isinstance(spec, SineSpec):
+        return ((float(spec.frequency_hz), _carrier_line_amplitude(spec, g0)),)
+    if isinstance(spec, MultitoneSpec):
         return tuple(
-            (float(tone.frequency_hz), float(tone.amplitude_g) * g0)
-            for tone in spec.tones  # type: ignore[union-attr]
+            (float(tone.frequency_hz), float(tone.amplitude_g) * g0) for tone in spec.tones
         )
     return ()
+
+
+def _carrier_line_amplitude(spec: SineSpec, g0: float) -> float:
+    """Amplitude the carrier *line* of a (possibly modulated) sine holds, m/s^2."""
+    amplitude = float(spec.amplitude_g) * g0
+    modulation = spec.modulation
+    if isinstance(modulation, FmModulation):
+        return amplitude * abs(float(jv(0, modulation.beta)))
+    return amplitude
+
+
+def _carriers(scenario: ScenarioConfig, constants: Constants) -> tuple[Carrier, ...]:
+    """Modulated carriers of the stimulus (doc 11 §2.1.3).
+
+    A carrier appears only where the configuration states one: a ``sine`` with a
+    ``modulation``, standalone or as a component of a ``composite``. Everything
+    else yields nothing, so the sideband branch stays silent rather than
+    inventing a carrier for a sweep or a record.
+    """
+    spec = scenario.excitation
+    g0 = constants.universal.g0_m_s2
+    candidates: tuple[ExcitationSpec, ...] = (
+        tuple(spec.components) if isinstance(spec, CompositeSpec) else (spec,)
+    )
+    carriers: list[Carrier] = []
+    for candidate in candidates:
+        if not isinstance(candidate, SineSpec) or candidate.modulation is None:
+            continue
+        carriers.append(
+            Carrier(
+                freq_hz=float(candidate.frequency_hz),
+                amplitude_m_s2=_carrier_line_amplitude(candidate, g0),
+                modulation=candidate.modulation,
+                drive_m_s2=float(candidate.amplitude_g) * g0,
+            )
+        )
+    return tuple(carriers)
 
 
 def _grid(scenario: ScenarioConfig) -> tuple[float | None, float | None]:
@@ -644,6 +748,104 @@ def predict_intermod(context: PredictionContext) -> tuple[ExpectedPeak, ...]:
     return tuple(peaks)
 
 
+@PEAK_PREDICTOR_REGISTRY.register("sideband")
+def predict_sidebands(context: PredictionContext) -> tuple[ExpectedPeak, ...]:
+    """AM/FM sidebands ``f_c +- k f_m`` of a modulated carrier (doc 11 §2.1.3).
+
+    Closed forms, both pinned by goldens against the formula and not against the
+    code output (18 §5(g)):
+
+    * **AM** -- one pair, ``m a_c / 2`` at ``f_c +- f_m``;
+    * **FM** -- the Bessel family, ``a_c |J_k(beta)|`` at ``f_c +- k f_m``, with
+      ``beta = Delta f / f_m``.
+
+    Unlike a harmonic, a sideband is present *in the stimulus itself* rather
+    than created downstream by the optical nonlinearity, so the mechanical
+    transfer acts on it at **its own** frequency: the predicted height in the
+    recovered-acceleration spectrum is the line amplitude times ``|D(f)|`` at
+    the sideband, not at the carrier.
+
+    Which orders are emitted is decided by the significance threshold (the NEA
+    of doc 07 referred to the input), not by a formula-side truncation:
+    ``J_k(beta)`` never vanishes identically, so any fixed order limit would be
+    an arbitrary cut. Carson's rule ``k_max ~ beta + 1`` remains a sanity
+    cross-check (and the loop guard :data:`_FM_ORDER_MARGIN` sits far above it).
+    Lines closer to the carrier than one spectral bin are dropped: they are not
+    resolvable in the run they are predicted for.
+
+    Parameters
+    ----------
+    context : PredictionContext
+        Resolved prediction context.
+
+    Returns
+    -------
+    tuple of ExpectedPeak
+        The predicted sideband lines (empty without a modulated carrier).
+    """
+    peaks: list[ExpectedPeak] = []
+    for carrier in context.carriers:
+        modulation = carrier.modulation
+        f_m = modulation.f_m_hz
+        for order, amplitude in _sideband_orders(carrier):
+            for sign, glyph in ((1.0, "+"), (-1.0, "-")):
+                freq_hz = abs(carrier.freq_hz + sign * order * f_m)
+                if not context.in_range(freq_hz):
+                    continue
+                if context.resolution_hz is not None and (
+                    abs(freq_hz - carrier.freq_hz) < context.resolution_hz
+                ):
+                    continue  # not resolvable from the carrier in this run
+                gain = abs(complex(context.cantilever.dynamic_factor(freq_hz)[0]))
+                height = amplitude * gain
+                threshold = context.threshold_at(freq_hz)
+                if threshold is not None and height < threshold:
+                    continue  # below the instrument's own floor: not a line to look for
+                peaks.append(
+                    ExpectedPeak(
+                        freq_hz=freq_hz,
+                        kind="sideband",
+                        label=(
+                            f"{modulation.kind.upper()} sideband "
+                            f"{carrier.freq_hz:.4g} {glyph} {order}*{f_m:.4g} Hz"
+                        ),
+                        explanation=_sideband_explanation(modulation, order),
+                        amplitude_m_s2=height,
+                        threshold_m_s2=threshold,
+                        order=order,
+                        source_freq_hz=carrier.freq_hz,
+                    )
+                )
+    return tuple(peaks)
+
+
+def _sideband_orders(carrier: Carrier) -> tuple[tuple[int, float], ...]:
+    """Return ``(order, line amplitude in m/s^2)`` of one carrier's sidebands."""
+    modulation = carrier.modulation
+    if isinstance(modulation, AmModulation):
+        return ((1, 0.5 * modulation.depth * carrier.drive_m_s2),)
+    beta = modulation.beta
+    highest = min(math.ceil(beta) + _FM_ORDER_MARGIN, _FM_ORDER_CAP)
+    return tuple(
+        (order, carrier.drive_m_s2 * abs(float(jv(order, beta)))) for order in range(1, highest + 1)
+    )
+
+
+def _sideband_explanation(modulation: AmModulation | FmModulation, order: int) -> str:
+    """One-line 'why this line is here' for a sideband (doc 20 §3.1)."""
+    if isinstance(modulation, AmModulation):
+        return (
+            f"AM sideband of the stimulus: depth m = {modulation.depth:.4g} puts "
+            "m*a_c/2 at f_c +- f_m (doc 11 §2.1.3); it moves with the carrier, "
+            "unlike the fixed mode line"
+        )
+    return (
+        f"FM sideband of order {order}: amplitude a_c*|J_{order}(beta)| with "
+        f"beta = {modulation.beta:.4g} (doc 11 §2.1.3); the family is symmetric "
+        "about f_c and conserves power (sum J_k^2 = 1)"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Public entry point.
 # --------------------------------------------------------------------------- #
@@ -710,6 +912,7 @@ def predict_expected_peaks(
         constants=consts,
         cantilever=cantilever,
         tones=_drive_tones(scenario, consts),
+        carriers=_carriers(scenario, consts),
         resolution_hz=resolution_hz,
         nyquist_hz=nyquist_hz,
         current_psd_a2_hz=current_psd,

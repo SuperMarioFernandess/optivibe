@@ -11,6 +11,7 @@ import math
 
 import numpy as np
 import pytest
+from scipy.special import jv
 
 from optivibe.analysis.expected_peaks import (
     PEAK_KINDS,
@@ -345,7 +346,7 @@ def test_expected_peaks_taxonomy_is_declared_in_full() -> None:
         "alias",
         "f_mount",
     )
-    assert set(PEAK_PREDICTOR_REGISTRY.keys()) == {"mode", "harmonic", "intermod"}
+    assert set(PEAK_PREDICTOR_REGISTRY.keys()) == {"mode", "harmonic", "intermod", "sideband"}
 
 
 def test_expected_peaks_empty_branches_are_silent(
@@ -353,10 +354,12 @@ def test_expected_peaks_empty_branches_are_silent(
 ) -> None:
     """Requesting an unimplemented branch yields nothing instead of an error.
 
-    The slots ``sideband`` (S-21), ``mains``, ``alias`` and ``f_mount`` are
-    declared so a caller can always ask for the whole taxonomy (doc 13).
+    The slots ``mains``, ``alias`` and ``f_mount`` are declared so a caller can
+    always ask for the whole taxonomy (doc 13); ``sideband`` was filled by S-21
+    and is silent here for a different reason -- the probe carries no modulated
+    carrier, which its own test pins.
     """
-    empty = ("sideband", "mains", "alias", "f_mount")
+    empty = ("mains", "alias", "f_mount")
     expected = predict_expected_peaks(_sine_scenario(), variant_b, constants, kinds=empty)
     assert expected.peaks == ()
     assert expected.kinds == empty
@@ -583,3 +586,149 @@ def test_plot_spectrum_is_unchanged_without_expected_peaks(
     axis = figure.get_axes()[0]
     assert len(axis.lines) == 1 + len(artifacts.result.dominant_freqs_hz)
     assert len(axis.patches) == 0
+
+
+# --------------------------------------------------------------------------- #
+# Sideband branch: AM / FM lines of a modulated carrier (doc 11 §2.1.3, S-21).
+# --------------------------------------------------------------------------- #
+def _modulated_scenario(
+    modulation: dict[str, object],
+    frequency_hz: float = 1000.0,
+    amplitude_g: float = 1.0,
+    fs_hz: float = 51200.0,
+    duration_s: float = 1.0,
+) -> ScenarioConfig:
+    """A single modulated carrier on variant B with the physical stages."""
+    return ScenarioConfig(
+        name="sideband_probe",
+        variant="B",
+        excitation={
+            "kind": "sine",
+            "fs_hz": fs_hz,
+            "duration_s": duration_s,
+            "frequency_hz": frequency_hz,
+            "amplitude_g": amplitude_g,
+            "modulation": modulation,
+        },
+        stages={"detector": "photodiode"},
+        seed=7,
+    )
+
+
+@pytest.mark.golden
+def test_golden_am_sideband_height_is_half_depth(
+    variant_b: VariantConfig, constants: Constants
+) -> None:
+    """AM sidebands sit at ``f_c +- f_m`` with ``m a_c / 2`` times the transfer.
+
+    The height is the formula of doc 11 §2.1.3 carried through the mechanical
+    dynamic factor at the sideband's *own* frequency -- a sideband is part of
+    the stimulus, unlike a harmonic, which the nonlinearity creates downstream.
+    """
+    f_c, f_m, depth, amplitude_g = 1000.0, 37.0, 0.4, 1.0
+    expected = predict_expected_peaks(
+        _modulated_scenario({"kind": "am", "f_m_hz": f_m, "depth": depth}), variant_b, constants
+    )
+    sidebands = expected.of_kind("sideband")
+    assert {round(peak.freq_hz, 6) for peak in sidebands} == {f_c - f_m, f_c + f_m}
+
+    cantilever = CantileverModel.from_config(constants, variant_b)
+    for peak in sidebands:
+        gain = abs(complex(cantilever.dynamic_factor(peak.freq_hz)[0]))
+        assert peak.amplitude_m_s2 == pytest.approx(
+            0.5 * depth * amplitude_g * G0 * gain, rel=1.0e-9
+        )
+        assert peak.order == 1
+        assert peak.source_freq_hz == f_c
+
+
+@pytest.mark.golden
+def test_golden_fm_sideband_heights_follow_bessel(
+    variant_b: VariantConfig, constants: Constants
+) -> None:
+    """FM sideband ``k`` carries ``a_c |J_k(beta)|`` (doc 11 §2.1.3)."""
+    f_c, f_m, beta, amplitude_g = 2000.0, 50.0, 3.0, 1.0
+    expected = predict_expected_peaks(
+        _modulated_scenario(
+            {"kind": "fm", "f_m_hz": f_m, "deviation_hz": beta * f_m}, frequency_hz=f_c
+        ),
+        variant_b,
+        constants,
+    )
+    cantilever = CantileverModel.from_config(constants, variant_b)
+    for peak in expected.of_kind("sideband"):
+        gain = abs(complex(cantilever.dynamic_factor(peak.freq_hz)[0]))
+        reference = amplitude_g * G0 * abs(float(jv(peak.order, beta))) * gain
+        assert peak.amplitude_m_s2 == pytest.approx(reference, rel=1.0e-9)
+        assert peak.freq_hz == pytest.approx(
+            f_c + math.copysign(1.0, peak.freq_hz - f_c) * peak.order * f_m
+        )
+
+    orders = {peak.order for peak in expected.of_kind("sideband")}
+    # Carson's rule as the sanity cross-check it is meant to be: the emitted
+    # family reaches at least the classic beta + 1 estimate.
+    assert max(orders) >= math.ceil(beta) + 1
+
+
+@pytest.mark.golden
+def test_golden_sideband_positions_match_the_realized_spectrum(
+    variant_b: VariantConfig, constants: Constants
+) -> None:
+    """Predicted sideband positions land within one bin of the real lines.
+
+    The end-to-end acceptance of S-21: the predictor and the synthesizer are
+    written from the same formula but not from each other.
+    """
+    f_c, f_m = 1000.0, 40.0
+    scenario = _modulated_scenario({"kind": "am", "f_m_hz": f_m, "depth": 0.5}, frequency_hz=f_c)
+    expected = predict_expected_peaks(scenario, variant_b, constants)
+    excitation = Pipeline(scenario, variant_b).forward().excitation
+    spectrum = amplitude_spectrum(excitation.a_x, excitation.fs)
+    resolution_hz = float(spectrum.freq[1] - spectrum.freq[0])
+    assert expected.resolution_hz == pytest.approx(resolution_hz, rel=1.0e-12)
+
+    for peak in expected.of_kind("sideband"):
+        index = int(np.argmin(np.abs(spectrum.freq - peak.freq_hz)))
+        assert abs(spectrum.freq[index] - peak.freq_hz) <= resolution_hz
+        # The line is really there: it dominates its neighbourhood.
+        neighbourhood = spectrum.values[index - 3 : index + 4]
+        assert spectrum.values[index] == pytest.approx(float(np.max(neighbourhood)))
+
+
+def test_sideband_branch_is_silent_without_a_carrier(
+    variant_b: VariantConfig, constants: Constants
+) -> None:
+    """No modulation in the configuration, no sidebands invented."""
+    expected = predict_expected_peaks(_sine_scenario(), variant_b, constants)
+    assert expected.of_kind("sideband") == ()
+
+
+def test_sidebands_are_predicted_for_composite_components(
+    variant_b: VariantConfig, constants: Constants
+) -> None:
+    """A modulated carrier inside a composite is found, and its tones feed harmonics."""
+    scenario = ScenarioConfig(
+        name="composite_probe",
+        variant="B",
+        excitation={
+            "kind": "composite",
+            "fs_hz": 51200.0,
+            "duration_s": 1.0,
+            "components": [
+                {
+                    "kind": "sine",
+                    "frequency_hz": 1200.0,
+                    "amplitude_g": 1.0,
+                    "modulation": {"kind": "am", "f_m_hz": 45.0, "depth": 0.5},
+                },
+                {"kind": "sine", "frequency_hz": 300.0, "amplitude_g": 0.5},
+            ],
+        },
+        stages={"excitation": "composite", "detector": "photodiode"},
+        seed=7,
+    )
+    expected = predict_expected_peaks(scenario, variant_b, constants)
+    assert {round(peak.freq_hz, 6) for peak in expected.of_kind("sideband")} == {1155.0, 1245.0}
+    # Both carriers are drive tones, so the harmonic/intermod branches see them.
+    harmonics = {round(peak.freq_hz, 6) for peak in expected.of_kind("harmonic")}
+    assert {2400.0, 600.0} <= harmonics

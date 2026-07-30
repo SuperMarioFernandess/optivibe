@@ -1,0 +1,55 @@
+# Composite, modulated stimulus (task S-21; spec doc 11 §2.1.3-§2.1.5).
+#
+# A deliberately rich test signal for the spectrum-interpretation protocol of
+# doc 20 §3: an AM carrier (a pair of sidebands at f_c +- f_m), an FM carrier
+# (the Bessel family at f_c +- k f_m) and a broadband noise floor, all on one
+# sampling grid. Every component keeps its own declared level -- the sum is not
+# renormalized (doc 11 §2.1.4), so the composite RMS follows from the parts.
+#
+# Predicted lines: `optivibe run examples/composite_modulated.yaml --figures`
+# marks them through analysis.expected_peaks (kinds: sideband / harmonic /
+# intermod / mode).
+name: composite_modulated
+variant: B
+seed: 20260730
+
+excitation:
+  kind: composite
+  axis: x
+  fs_hz: 50000.0
+  duration_s: 1.0
+  components:
+    # AM carrier: sidebands m*a_c/2 = 0.2 g at 1000 +- 37 Hz.
+    - kind: sine
+      frequency_hz: 1000.0
+      amplitude_g: 1.0
+      modulation:
+        kind: am
+        f_m_hz: 37.0
+        depth: 0.4
+    # FM carrier at the first zero of J0 (beta = 2.40483): the carrier line
+    # vanishes and the power sits entirely in the sidebands.
+    - kind: sine
+      frequency_hz: 4000.0
+      amplitude_g: 0.5
+      modulation:
+        kind: fm
+        f_m_hz: 50.0
+        deviation_hz: 120.2415
+    # Broadband floor, pinned by its own seed so it does not move when the
+    # component order changes (doc 11 §2.1.5).
+    - kind: random
+      band_hz: [20.0, 8000.0]
+      g_rms: 0.05
+      seed: 4242
+
+stages:
+  excitation: composite
+  mechanics: modal
+  optics: cylinder
+  detector: photodiode
+  dsp: standard
+
+dsp:
+  integrator: frequency
+  spectrum_method: fft

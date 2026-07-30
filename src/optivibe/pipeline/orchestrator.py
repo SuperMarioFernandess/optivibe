@@ -14,6 +14,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
+
 from optivibe.core.config.loader import load_scenario, load_variant
 from optivibe.core.config.models import ScenarioConfig, VariantConfig
 from optivibe.core.logging import get_logger
@@ -31,6 +33,7 @@ from optivibe.core.types import (
     TipState,
     VibrationResult,
 )
+from optivibe.core.units import G0_M_S2
 from optivibe.detector import DETECTOR_REGISTRY
 from optivibe.dsp import DSP_REGISTRY
 from optivibe.excitation import EXCITATION_REGISTRY
@@ -161,6 +164,7 @@ class Pipeline:
             All forward-chain intermediates.
         """
         excitation = self._excitation.generate(self._scenario.excitation, seed=self._scenario.seed)
+        _warn_beyond_full_scale(excitation, self._variant)
         tip = self._mechanics.run(excitation, self._variant)
         optical = self._optics.run(tip, self._variant)
         detector = self._detector.run(optical, self._variant)
@@ -202,6 +206,31 @@ class Pipeline:
             variant=self._variant,
             forward=forward,
             result=result,
+        )
+
+
+def _warn_beyond_full_scale(excitation: Excitation, variant: VariantConfig) -> None:
+    """Log a warning when the stimulus peak passes the variant full scale.
+
+    A **warning, never an error** (doc 11 §2.1.4): driving past FS is a
+    legitimate study -- that is how the ``2f`` product of the optical
+    nonlinearity is made visible (doc 20 §3.1) and how behaviour above the
+    specified 0.1-50 g range is investigated (doc 00). It matters most for the
+    ``composite``, whose level is the un-renormalized sum of its components and
+    is therefore easy to overshoot by accident, but the check is kind-agnostic:
+    the peak of ``|a(t)|`` is meaningful for every stimulus.
+    """
+    peak = float(np.max(np.sqrt(excitation.a_x**2 + excitation.a_y**2 + excitation.a_z**2)))
+    full_scale = variant.full_scale_g * G0_M_S2
+    if peak > full_scale:
+        logger.warning(
+            "stimulus peak %.4g m/s^2 (%.4g g) exceeds the full scale of variant %s "
+            "(%.4g g): the run is beyond the specified range and is kept as a study, "
+            "not clipped (doc 11 §2.1.4)",
+            peak,
+            peak / G0_M_S2,
+            variant.name,
+            variant.full_scale_g,
         )
 
 

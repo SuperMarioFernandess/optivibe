@@ -1,7 +1,8 @@
-"""Excitation builder widget: the S1 ``ExcitationSpec`` union (task S7 §2).
+"""Excitation builder widget: the ``ExcitationSpec`` union (task S7 §2, S-21).
 
 A ``kind`` selector over a stacked form (sine / multitone / sweep / random /
-shock, plus CSV / WAV / TDMS / UFF / MAT / HDF5 replay via the loader registry).
+shock / composite, plus CSV / WAV / TDMS / UFF / MAT / HDF5 replay via the
+loader registry).
 It collects a *payload* mapping that
 :func:`optivibe.gui.controllers.scenario_builder.build_excitation_spec`
 validates -- the widget holds no signal logic, only the input fields (09 §9).
@@ -12,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import yaml
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -21,6 +23,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPlainTextEdit,
     QPushButton,
     QSpinBox,
     QStackedWidget,
@@ -39,6 +42,7 @@ _KINDS = (
     "sweep",
     "random",
     "shock",
+    "composite",
     "csv",
     "wav",
     "tdms",
@@ -46,12 +50,18 @@ _KINDS = (
     "mat",
     "hdf5",
 )
-_GENERATED = {"sine", "multitone", "sweep", "random", "shock"}
+_GENERATED = {"sine", "multitone", "sweep", "random", "shock", "composite"}
+
+#: Carrier modulators offered on the sine page (doc 11 §2.1.3); "none" keeps the
+#: unmodulated payload, which is byte-identical to the pre-S-21 one.
+_MODULATIONS = ("none", "am", "fm")
 
 _KIND_HELP = (
     "What drives the sensor along the chosen axis:\n\n"
     "sine / multitone / sweep / random / shock -- GENERATED waveforms on the "
     "sampling grid below (fs, duration).\n"
+    "composite -- the SUM of several generated components on that same grid "
+    "(levels are not renormalized).\n"
     "csv / wav / tdms / uff / mat / hdf5 -- REPLAY of a recorded acceleration "
     "from a file (the grid comes from the file or the page fields; the "
     "sampling row is hidden).\n\nThe excitation is ground acceleration in g "
@@ -73,10 +83,16 @@ _SAMPLING_HELP = (
 _ABOUT = {
     "sine": (
         "single tone",
-        "One tone: frequency [Hz] and amplitude [g]. The basic probe of one "
-        "band point -- dominant-frequency recovery, 2f/1f distortion at a "
-        "bias~0 working point, RMS checks. Keep the frequency well below f1 "
-        "for off-resonance use.",
+        "One tone: frequency [Hz], amplitude [g] and an optional phase [rad]. "
+        "The basic probe of one band point -- dominant-frequency recovery, "
+        "2f/1f distortion at a bias~0 working point, RMS checks. Keep the "
+        "frequency well below f1 for off-resonance use.\n\n"
+        "Modulation (optional, doc 11 §2.1.3) turns the tone into a carrier: "
+        "AM adds one sideband pair of amplitude m*a_c/2 at f_c +- f_m; FM adds "
+        "the Bessel family a_c*|J_k(beta)| at f_c +- k*f_m with "
+        "beta = deviation/f_m. Both are marked in the spectrum by the "
+        "expected-peak layer. Depth m is limited to 0..1; a deeper AM is "
+        "expressible as a composite of carrier + two sideband tones.",
     ),
     "multitone": (
         "sum of tones",
@@ -104,6 +120,21 @@ _ABOUT = {
         "For transient/overload studies -- pair it with the modal_time "
         "mechanics and the time integrator (Physics layers tab) for a "
         "faithful transient.",
+    ),
+    "composite": (
+        "sum of components",
+        "The sum of several generated components on one sampling grid (doc 11 "
+        "§2.1.4). Each component keeps the level it declares -- the sum is NOT "
+        "renormalized, so the RMS adds in power and the peak may pass full "
+        "scale (a warning, not an error).\n\n"
+        "Components are edited as a YAML list, one mapping per component, "
+        "exactly as in a scenario file: the panel edits the config rather than "
+        "hiding it. fs / duration / axis come from the rows above unless a "
+        "component states its own axis. File-replay kinds and nested "
+        "composites are not admissible components.\n\n"
+        "Noise components: component 0 inherits the run seed, later ones get a "
+        "deterministic sub-seed from their position; give a component its own "
+        "'seed:' to pin its realization irrespective of position.",
     ),
     "csv": (
         "CSV replay",
@@ -274,6 +305,57 @@ class _MultitoneForm(QWidget):
         return tones
 
 
+class _CompositeForm(QWidget):
+    """Components of a ``composite`` excitation, edited as a YAML list (S-21).
+
+    Config-first (doc 13, coordination 2026-07-29): the panel edits the very
+    mapping a scenario file carries, so anything buildable in the GUI is
+    expressible in YAML and vice versa. A per-kind sub-form for every component
+    would mean a second, partial copy of this whole widget; that stays out of
+    S-21 by scope (a GUI backlog candidate).
+
+    Text that does not parse is passed through unchanged: validation then fails
+    loudly in ``build_excitation_spec``, where the main window already reports
+    it, instead of raising out of a payload getter that other code paths (the
+    language rebuild) call outside a try block.
+    """
+
+    _PLACEHOLDER = (
+        "- kind: sine\n"
+        "  frequency_hz: 1000.0\n"
+        "  amplitude_g: 1.0\n"
+        "  modulation: {kind: am, f_m_hz: 37.0, depth: 0.4}\n"
+        "- kind: random\n"
+        "  band_hz: [20.0, 2000.0]\n"
+        "  g_rms: 0.05\n"
+    )
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self._text = QPlainTextEdit()
+        self._text.setPlainText(self._PLACEHOLDER)
+        self._text.setMinimumHeight(140)
+        layout.addWidget(self._text)
+
+    def components(self) -> Any:
+        """Return the parsed component list (or the raw text if it does not parse)."""
+        text = self._text.toPlainText()
+        try:
+            parsed = yaml.safe_load(text)
+        except yaml.YAMLError:
+            return text
+        return parsed if isinstance(parsed, list) else text
+
+    def set_components(self, components: Any) -> None:
+        """Restore the editor from a payload value (list or raw text)."""
+        if isinstance(components, str):
+            self._text.setPlainText(components)
+        elif components:
+            self._text.setPlainText(yaml.safe_dump(components, sort_keys=False))
+
+
 class ExcitationBuilder(QWidget):
     """Collect an excitation payload for the S1 discriminated union.
 
@@ -325,15 +407,31 @@ class ExcitationBuilder(QWidget):
 
     def _build_pages(self) -> None:
         """Build one input page per excitation kind."""
-        # sine
+        # sine (with the optional S-21 carrier modulation)
         self._sine_freq = _spin(0.1, 1.0e5, 200.0, decimals=2, step=10.0)
         self._sine_amp = _spin(1e-3, 200.0, 1.0, decimals=3, step=0.1)
+        self._sine_phase = _spin(-6.2832, 6.2832, 0.0, decimals=4, step=0.1)
+        self._sine_mod = QComboBox()
+        self._sine_mod.addItems(_MODULATIONS)
+        self._sine_mod_fm = _spin(1e-3, 1.0e5, 10.0, decimals=3, step=1.0)
+        self._sine_mod_depth = _spin(0.0, 1.0, 0.5, decimals=3, step=0.05)
+        self._sine_mod_dev = _spin(0.0, 1.0e5, 50.0, decimals=3, step=1.0)
+        self._sine_mod.currentTextChanged.connect(self._on_modulation_changed)
         self._stack.addWidget(
             self._form(
-                [("frequency [Hz]", self._sine_freq), ("amplitude [g]", self._sine_amp)],
+                [
+                    ("frequency [Hz]", self._sine_freq),
+                    ("amplitude [g]", self._sine_amp),
+                    ("phase [rad]", self._sine_phase),
+                    ("modulation", self._sine_mod),
+                    ("f mod [Hz]", self._sine_mod_fm),
+                    ("depth m", self._sine_mod_depth),
+                    ("deviation [Hz]", self._sine_mod_dev),
+                ],
                 about="sine",
             )
         )
+        self._on_modulation_changed(self._sine_mod.currentText())
 
         # multitone (dynamic components: default 2, add/remove, optional phase)
         self._multitone = _MultitoneForm()
@@ -386,6 +484,10 @@ class ExcitationBuilder(QWidget):
                 about="shock",
             )
         )
+
+        # composite (config-first: the components are edited as YAML rows)
+        self._composite = _CompositeForm()
+        self._stack.addWidget(self._form([("components", self._composite)], about="composite"))
 
         # csv
         self._csv_path = QLineEdit()
@@ -567,6 +669,12 @@ class ExcitationBuilder(QWidget):
         if path:
             target.setText(path)
 
+    def _on_modulation_changed(self, mode: str) -> None:
+        """Show only the fields the selected carrier modulator needs."""
+        self._sine_mod_fm.setEnabled(mode != "none")
+        self._sine_mod_depth.setEnabled(mode == "am")
+        self._sine_mod_dev.setEnabled(mode == "fm")
+
     def _on_kind_changed(self, kind: str) -> None:
         """Switch the stacked page and toggle the sampling row visibility."""
         self._stack.setCurrentIndex(_KINDS.index(kind))
@@ -592,6 +700,23 @@ class ExcitationBuilder(QWidget):
         if kind == "sine":
             base["frequency_hz"] = self._sine_freq.value()
             base["amplitude_g"] = self._sine_amp.value()
+            if self._sine_phase.value() != 0.0:
+                base["phase_rad"] = self._sine_phase.value()
+            mode = self._sine_mod.currentText()
+            if mode == "am":
+                base["modulation"] = {
+                    "kind": "am",
+                    "f_m_hz": self._sine_mod_fm.value(),
+                    "depth": self._sine_mod_depth.value(),
+                }
+            elif mode == "fm":
+                base["modulation"] = {
+                    "kind": "fm",
+                    "f_m_hz": self._sine_mod_fm.value(),
+                    "deviation_hz": self._sine_mod_dev.value(),
+                }
+        elif kind == "composite":
+            base["components"] = self._composite.components()
         elif kind == "multitone":
             base["tones"] = self._multitone.tones()
         elif kind == "sweep":
@@ -668,6 +793,20 @@ class ExcitationBuilder(QWidget):
         if kind == "sine":
             _set(self._sine_freq, "frequency_hz")
             _set(self._sine_amp, "amplitude_g")
+            _set(self._sine_phase, "phase_rad")
+            modulation = payload.get("modulation") or {}
+            mode = str(modulation.get("kind", "none"))
+            if mode in _MODULATIONS:
+                self._sine_mod.setCurrentText(mode)
+            if "f_m_hz" in modulation:
+                self._sine_mod_fm.setValue(float(modulation["f_m_hz"]))
+            if "depth" in modulation:
+                self._sine_mod_depth.setValue(float(modulation["depth"]))
+            if "deviation_hz" in modulation:
+                self._sine_mod_dev.setValue(float(modulation["deviation_hz"]))
+            self._on_modulation_changed(self._sine_mod.currentText())
+        elif kind == "composite":
+            self._composite.set_components(payload.get("components", []))
         elif kind == "multitone":
             self._multitone.set_tones([list(map(float, tone)) for tone in payload.get("tones", [])])
         elif kind == "sweep":
