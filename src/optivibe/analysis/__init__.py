@@ -6,11 +6,20 @@ NEA budget with its contribution split and displacement floor, parameter sweeps
 (design and response) and the tolerance Monte-Carlo. Spectra and metrics are
 computed here (or in :mod:`optivibe.dsp`); ``viz`` only draws them (14 §8).
 Role S-02 (doc 20 §5) adds :mod:`optivibe.analysis.instrument`: the analyzer of
-recorded real-instrument output, reusing the same DSP tract (17 §7).
+recorded real-instrument output, reusing the same DSP tract (17 §7). Tasks
+S-16/S-17 add :mod:`optivibe.analysis.expected_peaks`: the *predicted* peak set
+of a run (doc 20 §3), computable from the configuration with no record at all.
 """
 
 from __future__ import annotations
 
+from optivibe.analysis.expected_peaks import (
+    PEAK_KINDS,
+    ExpectedPeak,
+    ExpectedPeaks,
+    PeakKind,
+    predict_expected_peaks,
+)
 from optivibe.analysis.instrument import (
     AnalyzeSpec,
     CalibrationSpec,
@@ -36,15 +45,19 @@ from optivibe.analysis.truth_vs_recovery import ErrorBudget, truth_vs_recovery
 from optivibe.analysis.variant_tools import AnalyticPoint, analytic_point, with_overrides
 
 __all__ = [
+    "PEAK_KINDS",
     "AnalyticPoint",
     "AnalyzeSpec",
     "AxisGrid",
     "CalibrationSpec",
     "ErrorBudget",
+    "ExpectedPeak",
+    "ExpectedPeaks",
     "InstrumentAnalysis",
     "MonteCarloResult",
     "MonteCarloSpec",
     "NeaBudget",
+    "PeakKind",
     "SweepResult",
     "SweepSpec",
     "ToleranceSpec",
@@ -53,6 +66,7 @@ __all__ = [
     "load_analysis_spec",
     "load_analyze_spec",
     "nea_budget",
+    "predict_expected_peaks",
     "run_monte_carlo",
     "run_sweep",
     "save_monte_carlo_npz",

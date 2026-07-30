@@ -11,15 +11,20 @@ only draws them.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import numpy as np
+from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
+from optivibe.analysis.expected_peaks import ExpectedPeaks
 from optivibe.core.config.models import Constants, VariantConfig
 from optivibe.core.types import DetectorOutput, FloatArray, Spectrum
 from optivibe.dsp.nea import nea_from_detector, nea_spectrum
 from optivibe.dsp.spectra import spectrogram
 
 __all__ = [
+    "EXPECTED_PEAK_COLORS",
     "plot_kinematics",
     "plot_nea",
     "plot_spectrogram",
@@ -71,8 +76,60 @@ def plot_true_vs_recovered(
     return fig
 
 
-def plot_spectrum(spectrum: Spectrum, dominant_freqs_hz: tuple[float, ...] = ()) -> Figure:
-    """Plot a spectrum and mark the dominant lines (S5).
+#: Marker colour per expected-peak taxonomy branch (S-16/S-17; doc 20 §3.1).
+EXPECTED_PEAK_COLORS: Mapping[str, str] = {
+    "mode": "tab:green",
+    "harmonic": "tab:orange",
+    "intermod": "tab:purple",
+}
+_EXPECTED_FALLBACK_COLOR = "tab:gray"
+
+
+def _draw_expected_peaks(ax: Axes, expected: ExpectedPeaks, y_top: float) -> None:
+    """Overlay the predicted lines of ``expected`` on a spectrum axis.
+
+    Each predicted line gets a dotted vertical marker with its label; a mode
+    additionally gets its ``f1/Q`` band shaded, because that width -- not the
+    line itself -- is what makes the resonance look "wide" on a broadband
+    stimulus (doc 20 §3.1). Drawing only; every number comes from
+    :mod:`optivibe.analysis.expected_peaks`.
+    """
+    band = expected.band_hz
+    if band is not None:
+        ax.axvspan(
+            band[0],
+            band[1],
+            color=EXPECTED_PEAK_COLORS["mode"],
+            alpha=0.15,
+            linewidth=0.0,
+            label="expected f1/Q band",
+        )
+    for index, peak in enumerate(expected.peaks):
+        color = EXPECTED_PEAK_COLORS.get(peak.kind, _EXPECTED_FALLBACK_COLOR)
+        ax.axvline(peak.freq_hz, color=color, linestyle=":", linewidth=1.2, alpha=0.9)
+        ax.annotate(
+            peak.label,
+            xy=(peak.freq_hz, y_top * (0.95 - 0.08 * (index % 3))),
+            fontsize=7,
+            color=color,
+            rotation=90,
+            va="top",
+            ha="right",
+        )
+
+
+def plot_spectrum(
+    spectrum: Spectrum,
+    dominant_freqs_hz: tuple[float, ...] = (),
+    *,
+    expected: ExpectedPeaks | None = None,
+) -> Figure:
+    """Plot a spectrum, mark the dominant lines and (opt-in) the expected ones.
+
+    The *measured* dominants (red, dashed) and the *expected* lines (dotted,
+    coloured per taxonomy branch) are drawn with deliberately different styles:
+    they are different epistemic categories, and telling them apart is the whole
+    point of the interpretation protocol of doc 20 §3 (tasks S-16/S-17).
 
     Parameters
     ----------
@@ -80,11 +137,16 @@ def plot_spectrum(spectrum: Spectrum, dominant_freqs_hz: tuple[float, ...] = ())
         Amplitude or PSD spectrum from the inverse chain.
     dominant_freqs_hz : tuple of float, optional
         Dominant frequencies to annotate, Hz.
+    expected : ExpectedPeaks or None, optional
+        Predicted lines from
+        :func:`~optivibe.analysis.expected_peaks.predict_expected_peaks`; when
+        given, they are overlaid together with the ``f1/Q`` resonance band.
+        Off by default, so the figure is unchanged for every existing caller.
 
     Returns
     -------
     matplotlib.figure.Figure
-        The spectrum (log-y for a PSD) with vertical markers at the dominants.
+        The spectrum (log-y for a PSD) with the requested markers.
     """
     fig = Figure(figsize=(8.0, 4.5), constrained_layout=True)
     ax = fig.subplots()
@@ -96,14 +158,12 @@ def plot_spectrum(spectrum: Spectrum, dominant_freqs_hz: tuple[float, ...] = ())
         ax.set_ylabel("PSD")
     else:
         ax.set_ylabel("amplitude")
+    y_top = float(np.max(values)) if values.size else 0.0
     for f_peak in dominant_freqs_hz:
         ax.axvline(f_peak, color="tab:red", linestyle="--", linewidth=1.0, alpha=0.7)
-        ax.annotate(
-            f"{f_peak:.3f} Hz",
-            xy=(f_peak, float(np.max(values)) if values.size else 0.0),
-            fontsize=8,
-            color="tab:red",
-        )
+        ax.annotate(f"{f_peak:.3f} Hz", xy=(f_peak, y_top), fontsize=8, color="tab:red")
+    if expected is not None:
+        _draw_expected_peaks(ax, expected, y_top)
     ax.set_xlabel("frequency [Hz]")
     ax.set_title(f"spectrum ({spectrum.kind}, {spectrum.method}, window={spectrum.window})")
     ax.grid(True, alpha=0.3)

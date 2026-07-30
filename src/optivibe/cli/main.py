@@ -33,6 +33,7 @@ from pathlib import Path
 from matplotlib.figure import Figure
 
 from optivibe.analysis import (
+    ExpectedPeaks,
     InstrumentAnalysis,
     MonteCarloSpec,
     SweepSpec,
@@ -40,6 +41,7 @@ from optivibe.analysis import (
     load_analysis_spec,
     load_analyze_spec,
     nea_budget,
+    predict_expected_peaks,
     run_monte_carlo,
     run_sweep,
     save_monte_carlo_npz,
@@ -177,6 +179,35 @@ def _save_figure(fig: Figure, directory: Path, name: str) -> Path:
     return out
 
 
+def _format_expected_peaks(expected: ExpectedPeaks) -> str:
+    """Render the predicted peak list of a run (step 1 of doc 20 §3.2).
+
+    Gives the head-less path the same information the GUI overlays, so the
+    interface can never show a marker the API does not produce (config-first,
+    doc 13 coordination 2026-07-29).
+    """
+    lines = [
+        f"expected peaks ({expected.variant_name}): f1 = {expected.f1_hz:.1f} Hz, "
+        f"Q = {expected.q_total:.0f}, width f1/Q = {expected.f1_hz / expected.q_total:.2f} Hz",
+    ]
+    if not expected.peaks:
+        lines.append("  (none in band)")
+        return "\n".join(lines)
+    for peak in expected.peaks:
+        amplitude = (
+            "-" if peak.amplitude_m_s2 is None else f"{peak.amplitude_m_s2 / G0 * 1e6:.3g} ug"
+        )
+        threshold = (
+            "-" if peak.threshold_m_s2 is None else f"{peak.threshold_m_s2 / G0 * 1e6:.3g} ug"
+        )
+        verdict = {True: "yes", False: "no", None: "?"}[peak.significant]
+        lines.append(
+            f"  {peak.freq_hz:10.3f} Hz  {peak.kind:9s} amp={amplitude:>10s} "
+            f"thr={threshold:>10s} significant={verdict}  ({peak.label})"
+        )
+    return "\n".join(lines)
+
+
 def _cmd_report(args: argparse.Namespace) -> int:
     """Execute the ``report`` subcommand: truth-vs-recovery + NEA budgets."""
     try:
@@ -190,7 +221,14 @@ def _cmd_report(args: argparse.Namespace) -> int:
         artifacts.forward.detector,
         variant=artifacts.variant,
     )
-    out = [_format_summary(artifacts), "", budget.summary_text()]
+    expected = predict_expected_peaks(artifacts.scenario, artifacts.variant)
+    out = [
+        _format_summary(artifacts),
+        "",
+        _format_expected_peaks(expected),
+        "",
+        budget.summary_text(),
+    ]
     nb = nea_budget(artifacts.forward.detector, artifacts.variant)
     if nb is not None:
         out += [
@@ -208,11 +246,21 @@ def _cmd_report(args: argparse.Namespace) -> int:
     sys.stdout.write("\n".join(out) + "\n")
     if args.figures is not None:
         from optivibe.viz.analysis import plot_nea_budget, plot_truth_vs_recovery_avx
+        from optivibe.viz.dsp import plot_spectrum
 
         a_true = artifacts.forward.excitation.a_x
         _save_figure(plot_truth_vs_recovery_avx(a_true, artifacts.result), args.figures, "truth")
         if nb is not None:
             _save_figure(plot_nea_budget(nb), args.figures, "nea_budget")
+        spectrum = artifacts.result.spectrum
+        if spectrum is not None:
+            # The recovered spectrum with the measured dominants *and* the
+            # predicted lines marked (tasks S-16/S-17; doc 20 §3).
+            _save_figure(
+                plot_spectrum(spectrum, artifacts.result.dominant_freqs_hz, expected=expected),
+                args.figures,
+                "spectrum",
+            )
         sys.stdout.write(f"figures saved to {args.figures}\n")
     return 0
 

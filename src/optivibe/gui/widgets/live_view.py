@@ -9,6 +9,16 @@ NEA(f) density with its shot/RIN/Johnson/thermal plateau split (from the analysi
 input-vs-recovered spectral overlay and the spectrogram live in the (matplotlib)
 Report tab, so this tab stays light and fast.
 
+An opt-in check-box overlays the *expected* peaks of the run on the spectrum
+panel (tasks S-16/S-17): the cantilever resonance ``f1`` with its shaded
+``f1/Q`` band and the drive-tone harmonics, so correct physics stops reading as
+an artifact (doc 20 §3). Every number arrives ready-made in an
+:class:`~optivibe.analysis.expected_peaks.ExpectedPeaks` artifact -- this view
+computes nothing (09 §9). The overlay is confined to :meth:`LiveView.
+set_expected_peaks` / :meth:`LiveView._refresh_expected` and touches no layout,
+so the planned real-time oscilloscope (O-SW-03) can reuse the helper instead of
+writing its own.
+
 A row of checkboxes (task S7-mod §4) shows/hides each panel; hiding a panel
 **reflows** the layout so the visible panels expand to fill the freed space (the
 panels live in one :class:`pyqtgraph.GraphicsLayoutWidget`, re-added in order on
@@ -24,6 +34,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QSplitter, QVBoxLayout, QWidget
 
 from optivibe.analysis import NeaBudget
+from optivibe.analysis.expected_peaks import ExpectedPeaks
 from optivibe.core.types import FloatArray, VibrationResult
 from optivibe.gui.i18n import t
 from optivibe.gui.widgets.cantilever_view import CantileverView
@@ -34,6 +45,15 @@ __all__ = ["LiveView"]
 
 _G0 = 9.80665
 _MAX_POINTS = 4000
+
+# Marker colour per expected-peak taxonomy branch (mirrors viz.dsp so the
+# pyqtgraph overlay and the matplotlib figure read the same).
+_EXPECTED_COLORS: dict[str, str] = {
+    "mode": "#2ca02c",
+    "harmonic": "#ff7f0e",
+    "intermod": "#9467bd",
+}
+_EXPECTED_FALLBACK_COLOR = "#7f7f7f"
 
 # Panel key -> checkbox label (order defines the top-to-bottom layout).
 _PANEL_LABELS: tuple[tuple[str, str], ...] = (
@@ -119,6 +139,8 @@ class LiveView(QWidget):
             "nea": self._p_nea,
         }
         self._visible: dict[str, bool] = {key: True for key, _ in _PANEL_LABELS}
+        self._expected: ExpectedPeaks | None = None
+        self._expected_items: list[pg.GraphicsObject] = []
         self._relayout()
 
         splitter = QSplitter(Qt.Orientation.Vertical)
@@ -145,6 +167,7 @@ class LiveView(QWidget):
         """Refresh static text after a language change (legends refresh on re-run)."""
         self._header.retranslate()
         self._cantilever_check.setText(t("cantilever"))
+        self._expected_check.setText(t("expected peaks"))
         for key, label in _PANEL_LABELS:
             self._checks[key].setText(t(label))
         self._p_accel.setTitle(t("Acceleration: input vs recovered"))
@@ -184,6 +207,16 @@ class LiveView(QWidget):
             check.toggled.connect(lambda shown, k=key: self._set_panel_visible(k, shown))
             self._checks[key] = check
             row.addWidget(check)
+
+        # Expected-peak overlay: opt-in, so the spectrum stays uncluttered by
+        # default (tasks S-16/S-17).
+        self._expected_check = QCheckBox(t("expected peaks"))
+        self._expected_check.setChecked(False)
+        self._expected_check.setToolTip(
+            t("Overlay the peaks the twin predicts: resonance f1 (+ f1/Q band) and drive harmonics")
+        )
+        self._expected_check.toggled.connect(lambda _shown: self._refresh_expected())
+        row.addWidget(self._expected_check)
         row.addStretch(1)
         return bar
 
@@ -200,6 +233,52 @@ class LiveView(QWidget):
             if self._visible[key]:
                 self._plots.addItem(self._panels[key], row=row, col=0)
                 row += 1
+
+    # ------------------------------------------------------------------ #
+    # Expected-peak overlay (tasks S-16/S-17; doc 20 §3)
+    # ------------------------------------------------------------------ #
+    def set_expected_peaks(self, expected: ExpectedPeaks | None) -> None:
+        """Attach (or clear) the predicted peak set for the spectrum overlay.
+
+        Parameters
+        ----------
+        expected : ExpectedPeaks or None
+            Prediction from
+            :func:`~optivibe.analysis.expected_peaks.predict_expected_peaks`;
+            ``None`` clears the overlay. Nothing is computed here -- the
+            artifact already carries the positions, widths and thresholds.
+        """
+        self._expected = expected
+        self._refresh_expected()
+
+    def _refresh_expected(self) -> None:
+        """Rebuild the overlay items on the spectrum panel (no layout change)."""
+        for item in self._expected_items:
+            self._p_spec.removeItem(item)
+        self._expected_items = []
+        expected = self._expected
+        if expected is None or not self._expected_check.isChecked():
+            return
+        band = expected.band_hz
+        if band is not None:
+            region = pg.LinearRegionItem(
+                values=band, brush=pg.mkBrush(44, 160, 44, 40), movable=False
+            )
+            region.setZValue(-10)
+            self._p_spec.addItem(region)
+            self._expected_items.append(region)
+        for peak in expected.peaks:
+            color = _EXPECTED_COLORS.get(peak.kind, _EXPECTED_FALLBACK_COLOR)
+            line = pg.InfiniteLine(
+                pos=peak.freq_hz,
+                angle=90,
+                pen=pg.mkPen(color, width=1, style=Qt.PenStyle.DotLine),
+                label=t(peak.label) if peak.kind == "mode" else peak.label,
+                labelOpts={"position": 0.9, "color": color, "rotateAxis": (1, 0)},
+            )
+            line.setToolTip(peak.explanation)
+            self._p_spec.addItem(line)
+            self._expected_items.append(line)
 
     def show_artifacts(self, artifacts: RunArtifacts, beta1_l: float) -> None:
         """Render a run's intermediates and recovered signals.

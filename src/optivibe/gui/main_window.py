@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
 from optivibe.analysis import (
     MonteCarloResult,
     SweepResult,
+    predict_expected_peaks,
     save_monte_carlo_npz,
     save_sweep_npz,
 )
@@ -143,7 +144,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(t("OptiVibe - fiber-optic vibration sensor digital twin"))
         self.resize(1280, 820)
         self._config_dir = config_dir
-        self._beta1_l = load_constants().universal.beta1_l
+        self._constants = load_constants()
+        self._beta1_l = self._constants.universal.beta1_l
         self._last_result: object | None = None
 
         self._controller = JobController(self)
@@ -559,11 +561,13 @@ class MainWindow(QMainWindow):
         self._last_result = result
         if isinstance(result, RunArtifacts):
             self._live.show_artifacts(result, self._beta1_l)
+            self._attach_expected(result)
             self._tabs.setCurrentWidget(self._live)
             self._announce_run(result)
         elif isinstance(result, ReportBundle):
             self._report.show_bundle(result)
             self._live.show_artifacts(result.artifacts, self._beta1_l)
+            self._attach_expected(result.artifacts)
             self._live.show_nea(result.nea)
             if result.nea is not None:
                 self._physics.set_nea_figure(plot_nea_budget(result.nea))
@@ -593,6 +597,36 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(tr("status.mc_done", name=result.name, n=result.n_draws))
         else:  # pragma: no cover - defensive
             self.statusBar().showMessage(tr("status.unrecognised"))
+
+    def _attach_expected(self, artifacts: RunArtifacts) -> None:
+        """Hand the run's predicted peak set to the Live spectrum (S-16/S-17).
+
+        Runs on the GUI thread, and that is deliberate. The S7 invariant
+        (``SW-06``) forbids work **whose cost grows with the data** -- the
+        pipeline, the DSP tract, an FFT, any walk over the samples; the
+        precedent is the input FFT that was moved out to Report for exactly
+        that reason. Building an ``ExpectedPeaks`` is O(1) arithmetic over the
+        resolved configuration: no time series is read, and the physics lives
+        in :mod:`optivibe.analysis.expected_peaks`, not here. The invariant is
+        also guaranteed *structurally* rather than by convention --
+        :func:`~optivibe.analysis.expected_peaks.predict_expected_peaks` accepts
+        only a scenario and a variant, so it is not even able to receive a
+        record. Criterion settled by coordination on 2026-07-30 (doc 13,
+        ``SW-70``); do not re-litigate it per call site.
+
+        The view still computes nothing: it only draws what the artifact
+        carries (09 §9). A failure must never cost the user a finished run, so
+        it degrades to "no overlay".
+        """
+        try:
+            expected = predict_expected_peaks(
+                artifacts.scenario, artifacts.variant, self._constants
+            )
+        except (ValueError, KeyError) as exc:  # pragma: no cover - defensive
+            logger.debug("expected-peak prediction skipped: %s", exc)
+            self._live.set_expected_peaks(None)
+            return
+        self._live.set_expected_peaks(expected)
 
     def _announce_run(self, artifacts: RunArtifacts) -> None:
         """Status line for a finished scenario run."""
