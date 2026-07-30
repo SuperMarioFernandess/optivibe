@@ -31,6 +31,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from PySide6.QtGui import QStandardItemModel
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -456,7 +457,7 @@ class _SubsystemForm(QGroupBox):
 
     def preset_name(self) -> str:
         """Return the selected preset name."""
-        return self._preset.currentText()
+        return str(self._preset.currentText())
 
     def overrides(self) -> dict[str, Any]:
         """Collect the override fields into a mapping (SI floats parsed)."""
@@ -562,9 +563,21 @@ class _SourceForm(_SubsystemForm):
     # Spectrum artifact (M-15)
     # ------------------------------------------------------------------ #
     def _set_measured_enabled(self, enabled: bool) -> None:
-        """Enable/disable the ``measured`` combo entry (needs a loaded table)."""
+        """Enable/disable the ``measured`` combo entry (needs a loaded table).
+
+        ``QComboBox.model()`` is typed as the abstract
+        :class:`~PySide6.QtCore.QAbstractItemModel`, so the per-item enable goes
+        through an explicit narrowing to the concrete
+        :class:`~PySide6.QtGui.QStandardItemModel` a combo actually holds.
+        Narrowing rather than a ``type: ignore`` keeps the file clean under mypy
+        **both** with and without the ``gui`` extra installed: without PySide6
+        the stubs collapse to ``Any`` and a blanket ignore would itself be
+        flagged as unused (task S-20; doc 18 §5).
+        """
         model = self._lineshape.model()
-        item = model.item(self._MEASURED_INDEX)  # type: ignore[attr-defined]
+        if not isinstance(model, QStandardItemModel):  # pragma: no cover - Qt always is
+            return
+        item = model.item(self._MEASURED_INDEX)
         if item is not None:
             item.setEnabled(enabled)
 
@@ -1282,7 +1295,7 @@ class SystemBuilderPanel(QTabWidget):
     # ------------------------------------------------------------------ #
     def starting_variant_key(self) -> str:
         """Return the starting composition letter (the scenario variant label)."""
-        return self._starting.currentText()
+        return str(self._starting.currentText())
 
     def _opt_float(self, edit: QLineEdit) -> float | None:
         """Parse an optional float field (blank -> ``None``)."""
