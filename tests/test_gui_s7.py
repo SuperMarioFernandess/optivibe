@@ -9,6 +9,7 @@ updates the window, and that cancellation and errors are handled without crashin
 
 from __future__ import annotations
 
+import threading
 import time
 from pathlib import Path
 
@@ -20,7 +21,6 @@ pytest.importorskip("pytestqt")
 
 pytestmark = pytest.mark.gui
 
-from PySide6.QtCore import QThread  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from optivibe.gui.controllers.job_controller import JobController  # noqa: E402
@@ -33,7 +33,18 @@ from optivibe.pipeline import RunArtifacts  # noqa: E402
 
 
 class _ThreadProbe:
-    """A job that records the QThread it runs on (for the off-thread proof)."""
+    """A job that records the thread it runs on (for the off-thread proof).
+
+    The identity recorded is :func:`threading.get_ident`, **not**
+    ``id(QThread.currentThread())``. The latter is the address of an ephemeral
+    PySide *wrapper*: the worker's wrapper dies with the call, CPython reuses
+    its address for the next wrapper, and the comparison then comes out equal
+    for two different threads (observed as a ~1-in-10 flake once the heap churn
+    changed, O-SW-03). The failure mode also runs the other way -- a wrapper
+    cache miss yields two addresses for one thread -- so the proof could pass
+    while the invariant was broken. ``get_ident`` is unique among *live*
+    threads, and the GUI thread is alive throughout, so it cannot alias.
+    """
 
     label = "thread-probe"
 
@@ -41,7 +52,7 @@ class _ThreadProbe:
         self.worker_thread: int | None = None
 
     def run(self, *, progress: object, is_cancelled: object) -> object:
-        self.worker_thread = id(QThread.currentThread())
+        self.worker_thread = threading.get_ident()
         return "ok"
 
 
@@ -110,9 +121,8 @@ def test_computation_runs_off_the_gui_thread(qtbot) -> None:
     probe = _ThreadProbe()
     with qtbot.waitSignal(controller.finished, timeout=10000):
         controller.start(probe)
-    main_thread = id(QApplication.instance().thread())
     assert probe.worker_thread is not None
-    assert probe.worker_thread != main_thread
+    assert probe.worker_thread != threading.get_ident()
     assert not controller.is_running()
 
 
