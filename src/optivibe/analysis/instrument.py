@@ -62,6 +62,7 @@ __all__ = [
     "InstrumentAnalysis",
     "analyze_record",
     "load_analyze_spec",
+    "record_sensitivity_model",
 ]
 
 
@@ -260,6 +261,55 @@ def _resolve_sensitivity(
         )
         raise ValueError(msg)
     return MeasuredSensitivity(variant, constants, bench_estimate), bench_estimate
+
+
+def record_sensitivity_model(
+    spec: AnalyzeSpec,
+    record: InstrumentRecord,
+    variant: VariantConfig,
+    constants: Constants,
+) -> SensitivityModel | None:
+    """Resolve the spec's calibration choice for an already-loaded record.
+
+    The public seam over the resolution :func:`analyze_record` performs
+    internally, for consumers that drive the same record through a *different*
+    chain -- the real-time replay of the live oscilloscope (O-SW-03) runs it
+    through :class:`~optivibe.dsp.streaming.StreamingDsp` instead of
+    :class:`~optivibe.dsp.standard.StandardDsp`. It exists so those consumers
+    **reuse** this decision rather than re-deriving a calibration of their own:
+    a record whose spec says ``bench`` must not be silently rendered with the
+    model scalar just because the consumer is a live view (17 §7, one
+    implementation; boundary G9 is enforced here as it is for the batch path).
+
+    Parameters
+    ----------
+    spec : AnalyzeSpec
+        The analysis spec carrying the calibration choice.
+    record : InstrumentRecord
+        The loaded record; its paired reference channel feeds the ``"bench"``
+        source.
+    variant : VariantConfig
+        The resolved instrument variant.
+    constants : Constants
+        Physical constants.
+
+    Returns
+    -------
+    SensitivityModel or None
+        The model to inject into the inverse chain, or ``None`` when the spec
+        carries no calibration (graceful degradation: scale-free metrics only).
+
+    Raises
+    ------
+    ValueError
+        On the ``"model"`` source with a non-cylinder variant (boundary G9), or
+        on ``"bench"`` without a paired reference channel.
+    """
+    bench_estimate: float | None = None
+    if record.reference_accel is not None:
+        bench_estimate = bench_sensitivity(record.detector, record.reference_accel, variant)
+    resolved = _resolve_sensitivity(spec, variant, constants, bench_estimate)
+    return None if resolved is None else resolved[0]
 
 
 def _nea_referral(

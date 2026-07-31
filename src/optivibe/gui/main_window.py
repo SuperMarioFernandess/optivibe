@@ -47,6 +47,7 @@ from optivibe.analysis import (
     save_monte_carlo_npz,
     save_sweep_npz,
 )
+from optivibe.analysis.instrument import load_analyze_spec
 from optivibe.core.config.loader import default_config_dir, load_constants
 from optivibe.core.config.models import ScenarioConfig
 from optivibe.core.config.subsystems import SystemConfig
@@ -57,6 +58,7 @@ from optivibe.gui.controllers.scenario_builder import (
     build_scenario_config,
     build_sweep_spec,
 )
+from optivibe.gui.controllers.stream_controller import StreamController
 from optivibe.gui.controllers.system_builder import build_system_config, resolve_system_variant
 from optivibe.gui.i18n import (
     LANGUAGES,
@@ -75,6 +77,7 @@ from optivibe.gui.widgets import (
     ReportPanel,
     SweepPanel,
 )
+from optivibe.gui.widgets.live_controls import SOURCE_RECORD
 from optivibe.gui.widgets.preferences_dialog import PreferencesDialog
 from optivibe.gui.workers.jobs import (
     Job,
@@ -83,6 +86,14 @@ from optivibe.gui.workers.jobs import (
     ReportJob,
     ScenarioJob,
     SweepJob,
+)
+from optivibe.gui.workers.stream import (
+    RecordSource,
+    ScenarioSource,
+    StreamConfig,
+    StreamFrame,
+    StreamSetup,
+    StreamSource,
 )
 from optivibe.mechanics.cantilever import first_mode_hz
 from optivibe.pipeline import RunArtifacts
@@ -147,6 +158,7 @@ class MainWindow(QMainWindow):
         self._constants = load_constants()
         self._beta1_l = self._constants.universal.beta1_l
         self._last_result: object | None = None
+        self._streaming = False
 
         self._controller = JobController(self)
         self._controller.progress.connect(self._on_progress)
@@ -154,8 +166,19 @@ class MainWindow(QMainWindow):
         self._controller.failed.connect(self._on_failed)
         self._controller.cancelled.connect(self._on_cancelled)
 
+        # The second worker family (task O-SW-03): a live stream instead of a
+        # one-shot job. Its own controller, its own thread; the two are mutually
+        # exclusive by policy (see _set_streaming), not by accident.
+        self._stream = StreamController(self)
+        self._stream.opened.connect(self._on_stream_opened)
+        self._stream.frame.connect(self._on_stream_frame)
+        self._stream.stopped.connect(self._on_stream_stopped)
+        self._stream.failed.connect(self._on_stream_failed)
+
         self._panel = ControlPanel(config_dir=config_dir)
         self._live = LiveView()
+        self._live.controls.start_requested.connect(self._on_live_start)
+        self._live.controls.stop_requested.connect(self._stream.stop)
         self._report = ReportPanel()
         self._sweep = SweepPanel()
         self._monte = MonteCarloPanel()
@@ -540,6 +563,11 @@ class MainWindow(QMainWindow):
         """Start a job off the UI thread and lock the action buttons."""
         if self._controller.is_running():
             return
+        if self._stream.is_running():
+            # Mutual exclusion with the live stream (the panel run buttons of
+            # Sweeps / Monte-Carlo reach this method directly).
+            self.statusBar().showMessage(tr("status.job_live_busy"))
+            return
         self._set_running(True)
         self.statusBar().showMessage(tr("status.running", label=label))
         try:
@@ -662,8 +690,124 @@ class MainWindow(QMainWindow):
         self._report_button.setEnabled(not running)
         self._export_button.setEnabled(not running)
         self._cancel_button.setEnabled(running)
+        self._live.controls.setEnabled(not running)
         self._progress.setRange(0, 0 if running else 1)
         self._progress.setVisible(running)
+
+    # ------------------------------------------------------------------ #
+    # Real-time mode (task O-SW-03)
+    # ------------------------------------------------------------------ #
+    def _on_live_start(self) -> None:
+        """Assemble the selected source and start the live stream."""
+        if self._stream.is_running():
+            return
+        if self._controller.is_running():
+            self.statusBar().showMessage(tr("status.live_busy"))
+            return
+        source = self._build_stream_source()
+        if source is None:
+            return
+        controls = self._live.controls
+        config = StreamConfig(
+            rate_hz=controls.rate_hz(),
+            speed=controls.speed(),
+            loop=controls.loop_enabled(),
+        )
+        self._set_streaming(True)
+        self._live.begin_stream()
+        try:
+            self._stream.start(source, config)
+        except RuntimeError as exc:  # pragma: no cover - guarded by is_running
+            self._set_streaming(False)
+            self._live.end_stream(str(exc))
+            return
+        self.statusBar().showMessage(tr("status.live_started", label=source.label))
+
+    def _build_stream_source(self) -> StreamSource | None:
+        """Build the source for the current selection, or report why not.
+
+        Only *config* is read here (a scenario payload, or a small analyze-spec
+        YAML). The record itself, the composition resolve and the forward run
+        happen inside :meth:`StreamSource.open` on the worker thread (SW-06):
+        this method must stay O(1) in the data, like the composition check.
+        """
+        controls = self._live.controls
+        if controls.source_kind() == SOURCE_RECORD:
+            path = controls.spec_path()
+            if path is None:
+                self.statusBar().showMessage(tr("status.live_no_spec"))
+                return None
+            try:
+                spec = load_analyze_spec(path)
+            except (ValueError, TypeError, OSError) as exc:
+                self.statusBar().showMessage(
+                    tr("status.live_bad_spec", exc=str(exc).splitlines()[0])
+                )
+                return None
+            return RecordSource(spec=spec, config_dir=self._config_dir)
+        scenario = self._build_scenario()
+        if scenario is None:
+            return None
+        system = self._build_system()
+        if system is None:
+            return None
+        return ScenarioSource(scenario=scenario, system=system, config_dir=self._config_dir)
+
+    def _on_stream_opened(self, payload: object) -> None:
+        """Attach the expected-peak overlay once the source has resolved.
+
+        The synthetic source knows its scenario and (now) its resolved variant,
+        so the prediction is available live. It is assembled here, on the UI
+        thread, for the reason settled in ``SW-70``: it is O(1) arithmetic over
+        the configuration and cannot read a time series. A file record carries
+        no scenario, so it gets no overlay rather than a guessed one.
+        """
+        if not isinstance(payload, StreamSetup):  # pragma: no cover - defensive
+            return
+        if payload.scenario is None:
+            self._live.set_expected_peaks(None)
+            return
+        try:
+            expected = predict_expected_peaks(payload.scenario, payload.variant, self._constants)
+        except (ValueError, KeyError) as exc:  # pragma: no cover - defensive
+            logger.debug("expected-peak prediction skipped for the stream: %s", exc)
+            self._live.set_expected_peaks(None)
+            return
+        self._live.set_expected_peaks(expected)
+
+    def _on_stream_frame(self, payload: object) -> None:
+        """Render one live frame (payload arrives as ``object`` over a signal)."""
+        if isinstance(payload, StreamFrame):
+            self._live.show_stream_frame(payload)
+
+    def _on_stream_stopped(self) -> None:
+        """Return to the idle layout after the stream ended."""
+        self._set_streaming(False)
+        self._live.end_stream()
+        self.statusBar().showMessage(tr("status.live_stopped"))
+
+    def _on_stream_failed(self, message: str) -> None:
+        """Report a stream that could not start or died."""
+        self._set_streaming(False)
+        self._live.end_stream(tr("status.live_failed", message=message))
+        self.statusBar().showMessage(tr("status.live_failed", message=message))
+
+    def _set_streaming(self, streaming: bool) -> None:
+        """Lock/unlock the one-shot actions for the duration of a stream.
+
+        The two worker families are mutually exclusive **by policy**, not
+        because a thread happens to be shared: a live stream and a finished run
+        would otherwise put two unrelated sets of numbers on the same panels,
+        and no provenance line could say which is which.
+        """
+        self._streaming = streaming
+        for button in (
+            self._run_button,
+            self._report_button,
+            self._check_button,
+            self._export_button,
+        ):
+            button.setEnabled(not streaming)
 
     # ------------------------------------------------------------------ #
     # Export
@@ -751,6 +895,7 @@ class MainWindow(QMainWindow):
         if handler is not None:
             logging.getLogger("optivibe").removeHandler(handler)
         self._live.stop()
+        self._stream.stop()
         self._controller.cancel()
         super().closeEvent(event)
 

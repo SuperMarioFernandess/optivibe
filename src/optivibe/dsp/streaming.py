@@ -3,14 +3,14 @@
 The batch integrators in :mod:`optivibe.dsp.kinematics` are *non-causal* -- the
 frequency method takes a full-record rFFT and the time method a whole-record
 cubic detrend plus a zero-phase ``sosfiltfilt`` -- so neither can emit a sample
-until the entire record is known (doc 06 §3.6). The real-time layer therefore
+until the entire record is known (theory-06 §3.6). The real-time layer therefore
 uses a **causal scheme**: a leaky integrator, i.e. a first-order recursive
 high-pass/integrator that carries its filter state ``zi`` across frames and runs
 sample-by-sample with bounded latency.
 
 The causal scheme is *not* bit-exact with the batch integrators on the
 integration stage -- that is impossible by construction (the batch path is
-non-causal, doc 06 §7.6). It agrees with the batch path in band, after warm-up,
+non-causal, theory-06 §7.6). It agrees with the batch path in band, after warm-up,
 within the doc 11 §7 tolerances. The batch chain and its frozen numbers are
 untouched; this module is strictly additive.
 
@@ -38,6 +38,61 @@ from optivibe.dsp.spectra import amplitude_spectrum, dominant_frequencies, welch
 __all__ = ["LeakyIntegrator", "StreamingDsp", "StreamingSpectrum", "replay_record"]
 
 
+class _TraceRing:
+    """Fixed-size ring buffer over the most recent ``capacity`` samples.
+
+    Backs the *display* trace of :class:`StreamingDsp` when the history is
+    bounded. The storage is one pre-allocated array written in place, so the
+    memory of an endless stream is constant by construction -- the whole point
+    of the bounded mode (theory-06 §5.7: a live monitor keeps the newest, it
+    does not accumulate). Never grow this into a list of blocks: that silently
+    restores the unbounded cost the bounded mode exists to remove.
+
+    Parameters
+    ----------
+    capacity : int
+        Number of samples retained (``>= 1``).
+    """
+
+    def __init__(self, capacity: int) -> None:
+        self._capacity = int(capacity)
+        self._buf = np.zeros(self._capacity, dtype=np.float64)
+        self._start = 0
+        self._filled = 0
+
+    def push(self, block: FloatArray) -> None:
+        """Append ``block``, overwriting the oldest samples once full.
+
+        Parameters
+        ----------
+        block : numpy.ndarray, shape (n,)
+            New contiguous samples.
+        """
+        cap = self._capacity
+        x = block if block.size <= cap else block[-cap:]
+        n = int(x.size)
+        end = (self._start + self._filled) % cap
+        first = min(n, cap - end)
+        self._buf[end : end + first] = x[:first]
+        if n > first:
+            self._buf[: n - first] = x[first:]
+        if self._filled + n < cap:
+            self._filled += n
+        else:
+            self._filled = cap
+            self._start = (end + n) % cap
+
+    def values(self) -> FloatArray:
+        """Return the retained samples in chronological order (a fresh copy)."""
+        if self._filled == 0:
+            return np.empty(0, dtype=np.float64)
+        if self._filled < self._capacity:
+            return np.ascontiguousarray(self._buf[: self._filled])
+        return np.ascontiguousarray(
+            np.concatenate([self._buf[self._start :], self._buf[: self._start]])
+        )
+
+
 class LeakyIntegrator:
     r"""Causal first-order leaky integrator (one ``a -> v`` or ``v -> x`` stage).
 
@@ -53,14 +108,14 @@ class LeakyIntegrator:
 
     giving a finite DC gain ``dt / (1 - alpha)`` and forgetting old offsets with
     time constant ``1 / (2 pi f_c)`` -- equivalently an integrator followed by a
-    causal first-order high-pass at ``f_c`` (doc 06 §3.6). The cut-off ``f_c`` is
+    causal first-order high-pass at ``f_c`` (theory-06 §3.6). The cut-off ``f_c`` is
     the streaming high-pass ``DspOptions.f_c_stream`` (independent of the batch
-    ``f_hp``, doc 06 §9.3-2).
+    ``f_hp``, theory-06 §9.3-2).
 
     The instance carries the filter state ``zi`` between :meth:`process` calls,
     so streaming a signal in frames of any size yields exactly the same samples
     as a single call -- the internal seam-invariance the acceptance golden
-    checks (doc 06 §7.6-ii). Chain two instances for ``a -> v -> x``.
+    checks (theory-06 §7.6-ii). Chain two instances for ``a -> v -> x``.
 
     Parameters
     ----------
@@ -149,7 +204,7 @@ class StreamingSpectrum:
     The batch spectrum (:func:`~optivibe.dsp.spectra.welch_psd`) needs the whole
     record. The streaming spectrum instead keeps the last ``nperseg`` samples in
     a ring buffer and, every ``hop = nperseg - noverlap`` samples, forms one
-    windowed periodogram and folds it into a running estimate (doc 06 §5.2)
+    windowed periodogram and folds it into a running estimate (theory-06 §5.2)
 
     .. math::
 
@@ -167,7 +222,7 @@ class StreamingSpectrum:
 
     Segmentation depends only on the *total* number of samples seen, not on how
     they are chunked across :meth:`process` calls, so feeding a signal in frames
-    of any size yields the same estimate (seam-invariance, doc 06 §7.6-ii).
+    of any size yields the same estimate (seam-invariance, theory-06 §7.6-ii).
 
     Parameters
     ----------
@@ -175,11 +230,11 @@ class StreamingSpectrum:
         Sampling rate, Hz (``> 0``).
     nperseg : int
         Segment/FFT length ``L`` (``>= 2``); sets the resolution ``fs / L`` and
-        the frame-fill latency ``L / fs`` (doc 06 §5.5).
+        the frame-fill latency ``L / fs`` (theory-06 §5.5).
     window : str, optional
         Window name (default ``"hann"``), passed through to the periodogram.
     noverlap : int or None, optional
-        Segment overlap; ``None`` uses ``nperseg // 2`` (50 %, doc 06 §2.4).
+        Segment overlap; ``None`` uses ``nperseg // 2`` (50 %, theory-06 §2.4).
     beta : float or None, optional
         Exponential forgetting factor ``0 < beta < 1``. ``None`` derives it from
         ``avg_segments`` as ``1 - 1 / avg_segments``.
@@ -317,15 +372,15 @@ class StreamingDsp:
 
     The real-time counterpart of :class:`~optivibe.dsp.standard.StandardDsp`. It
     runs the same five stages, but each carries state across frames so it can
-    consume an unbounded stream of detector-sample blocks (doc 06 §5.4):
+    consume an unbounded stream of detector-sample blocks (theory-06 §5.4):
 
     1. **Calibration** ``samples -> a`` -- the *same*
        :func:`~optivibe.dsp.calibration.calibrate_acceleration` per block; it is
        per-sample memoryless, so block-by-block output is **bit-identical** to
-       the batch calibration (doc 06 §7.6-i).
+       the batch calibration (theory-06 §7.6-i).
     2. **Kinematics** ``a -> v -> x`` -- two chained
        :class:`LeakyIntegrator` stages (causal, state ``zi`` carried), the
-       causal scheme of doc 06 §3.6 (cut-off ``f_c_stream``).
+       causal scheme of theory-06 §3.6 (cut-off ``f_c_stream``).
     3. **Spectrum** -- a :class:`StreamingSpectrum` on acceleration (dominant
        lines) and one on velocity (band RMS).
     4. **Metrics** -- running RMS, band-RMS velocity -> ISO severity, second
@@ -363,6 +418,17 @@ class StreamingDsp:
         Accumulate the full ``a/v/x`` for the snapshot (default ``True``; the
         finite replay/verification path). ``False`` keeps only the last
         ``nperseg`` samples as a live oscilloscope trace (bounded memory).
+    history_samples : int or None, optional
+        Length of the retained ``a/v/x`` *display* trace when
+        ``keep_history=False``; ``None`` (default) keeps ``nperseg`` samples,
+        which is bit-identical to the pre-O-SW-03 behaviour. The parameter
+        exists because one spectral frame is a poor oscilloscope window for a
+        human: at the reference profile (``fs = 100 kHz``, ``L = 4096``,
+        theory-06 §5.5) it is 41 ms. It moves **nothing but the trace** -- the
+        spectra, the running metrics and the integrator states are untouched,
+        so no number changes with it. Memory stays bounded: the trace lives in a
+        pre-allocated ring (:class:`_TraceRing`), never a growing list. Invalid
+        together with ``keep_history=True`` (the unbounded mode has no window).
     """
 
     def __init__(
@@ -377,7 +443,15 @@ class StreamingDsp:
         noverlap: int | None = None,
         avg_segments: int = 8,
         keep_history: bool = True,
+        history_samples: int | None = None,
     ) -> None:
+        if history_samples is not None:
+            if keep_history:
+                msg = "history_samples applies only to the bounded mode (keep_history=False)"
+                raise ValueError(msg)
+            if history_samples < 1:
+                msg = f"history_samples must be >= 1, got {history_samples}"
+                raise ValueError(msg)
         self._fs = template.fs
         self._dc_level = template.dc_level
         self._units = template.units
@@ -408,6 +482,11 @@ class StreamingDsp:
         self._hist_a: list[FloatArray] = []
         self._hist_v: list[FloatArray] = []
         self._hist_x: list[FloatArray] = []
+        capacity = nperseg if history_samples is None else int(history_samples)
+        self._trace_capacity = None if keep_history else capacity
+        self._ring_a = _TraceRing(capacity)
+        self._ring_v = _TraceRing(capacity)
+        self._ring_x = _TraceRing(capacity)
         # NEA is signal-independent -> compute once from the template.
         self._nea = nea_from_detector(template, variant, self._constants)
         self._dropped = 0
@@ -432,19 +511,19 @@ class StreamingDsp:
 
     @property
     def dropped_samples(self) -> int:
-        """Samples flagged as dropped by the source (provenance, doc 06 §5.7)."""
+        """Samples flagged as dropped by the source (provenance, theory-06 §5.7)."""
         return self._dropped
 
     @property
     def warmed(self) -> bool:
-        """Whether the causal filters and spectra have settled (doc 06 §5.7)."""
+        """Whether the causal filters and spectra have settled (theory-06 §5.7)."""
         return self._spec_a.ready and self._n >= self._warmup_samples
 
     def note_dropped(self, count: int) -> None:
         """Record ``count`` samples the source dropped (a stream discontinuity).
 
         Increments the provenance counter; snapshots taken across a gap should be
-        treated as not fully continuous (doc 06 §5.7).
+        treated as not fully continuous (theory-06 §5.7).
         """
         if count < 0:
             msg = f"count must be non-negative, got {count}"
@@ -488,9 +567,24 @@ class StreamingDsp:
             self._hist_v.append(velocity)
             self._hist_x.append(displacement)
         else:
-            self._hist_a = [np.concatenate([*self._hist_a, accel])[-self._spec_a.nperseg :]]
-            self._hist_v = [np.concatenate([*self._hist_v, velocity])[-self._spec_a.nperseg :]]
-            self._hist_x = [np.concatenate([*self._hist_x, displacement])[-self._spec_a.nperseg :]]
+            self._ring_a.push(accel)
+            self._ring_v.push(velocity)
+            self._ring_x.push(displacement)
+
+    @property
+    def trace_samples(self) -> int | None:
+        """Length of the retained display trace, or ``None`` when unbounded."""
+        return self._trace_capacity
+
+    def _traces(self) -> tuple[FloatArray, FloatArray, FloatArray]:
+        """Return the current ``a/v/x`` traces (full history or bounded window)."""
+        if self._keep_history:
+            return (
+                np.concatenate(self._hist_a) if self._hist_a else np.empty(0),
+                np.concatenate(self._hist_v) if self._hist_v else np.empty(0),
+                np.concatenate(self._hist_x) if self._hist_x else np.empty(0),
+            )
+        return self._ring_a.values(), self._ring_v.values(), self._ring_x.values()
 
     def _running_rms(self) -> dict[str, float]:
         if self._n == 0:
@@ -500,14 +594,13 @@ class StreamingDsp:
     def snapshot(self) -> VibrationResult:
         """Assemble the current :class:`~optivibe.core.types.VibrationResult`.
 
-        The ``a/v/x`` traces are the accumulated stream (or the last window when
-        ``keep_history=False``); the RMS, spectrum, dominant lines, ISO and NEA
+        The ``a/v/x`` traces are the accumulated stream (or the last
+        ``history_samples`` / ``nperseg`` window when ``keep_history=False``);
+        the RMS, spectrum, dominant lines, ISO and NEA
         are the running streaming estimates. The ``2f`` residual is taken from
         the amplitude spectrum of the (bit-exact) acceleration.
         """
-        a = np.concatenate(self._hist_a) if self._hist_a else np.empty(0)
-        v = np.concatenate(self._hist_v) if self._hist_v else np.empty(0)
-        x = np.concatenate(self._hist_x) if self._hist_x else np.empty(0)
+        a, v, x = self._traces()
 
         spec_a = self._spec_a.spectrum()
         dominant = dominant_frequencies(spec_a) if spec_a is not None else ()
@@ -555,7 +648,7 @@ def replay_record(
     Feeds ``detector.samples`` to a :class:`StreamingDsp` in ``block_size``
     chunks -- the same path a live DAQ or the synthetic generator would take --
     and returns the final snapshot. This is the finite-record driver the
-    batch<->stream acceptance golden runs (doc 06 §7.6).
+    batch<->stream acceptance golden runs (theory-06 §7.6).
 
     Parameters
     ----------

@@ -19,6 +19,21 @@ set_expected_peaks` / :meth:`LiveView._refresh_expected` and touches no layout,
 so the planned real-time oscilloscope (O-SW-03) can reuse the helper instead of
 writing its own.
 
+The same panels serve the **real-time mode** (task O-SW-03): a
+:class:`~optivibe.gui.widgets.live_controls.LiveControls` bar starts a
+continuous stream and :meth:`LiveView.show_stream_frame` redraws the recovered
+``a/v/x`` and the running spectrum from each
+:class:`~optivibe.gui.workers.stream.StreamFrame`. The view still computes
+nothing: every number is produced by
+:class:`~optivibe.dsp.streaming.StreamingDsp` on the worker thread, and the
+frame carries a *bounded* trace (the streaming window, config-fixed), so the
+drawing cost here does not grow with how long the stream has been running --
+the S7 criterion (SW-70) holds structurally, not by convention. Two panels stay
+blank while streaming and say so: the *input* curve (a live stream has no
+truth series aligned to its window) and the detector trace (the streaming
+snapshot carries the recovered signals, not the raw capture; shadowing it here
+would mean a second, parallel ring buffer in the view).
+
 A row of checkboxes (task S7-mod §4) shows/hides each panel; hiding a panel
 **reflows** the layout so the visible panels expand to fill the freed space (the
 panels live in one :class:`pyqtgraph.GraphicsLayoutWidget`, re-added in order on
@@ -36,9 +51,11 @@ from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QSplitter, QVBoxLayout, QW
 from optivibe.analysis import NeaBudget
 from optivibe.analysis.expected_peaks import ExpectedPeaks
 from optivibe.core.types import FloatArray, VibrationResult
-from optivibe.gui.i18n import t
+from optivibe.gui.i18n import t, tr
 from optivibe.gui.widgets.cantilever_view import CantileverView
+from optivibe.gui.widgets.live_controls import LiveControls
 from optivibe.gui.widgets.ui_helpers import tab_header
+from optivibe.gui.workers.stream import StreamFrame
 from optivibe.pipeline import RunArtifacts
 
 __all__ = ["LiveView"]
@@ -155,17 +172,22 @@ class LiveView(QWidget):
             "PyQtGraph panels for input-vs-recovered acceleration, the detector "
             "signal, recovered velocity/displacement, the amplitude spectrum and "
             "the NEA(f) density. The check-row shows/hides each panel (session "
-            "only); no controls here change the model -- edit on the left and Run.",
+            "only); no controls here change the model -- edit on the left and Run. "
+            "The top bar streams a scenario or a recorded capture in real time, "
+            "with warm-up and dropped-sample provenance always on screen.",
         )
+        self._controls = LiveControls()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._header)
+        layout.addWidget(self._controls)
         layout.addWidget(self._visibility_bar())
         layout.addWidget(splitter)
 
     def retranslate(self) -> None:
         """Refresh static text after a language change (legends refresh on re-run)."""
         self._header.retranslate()
+        self._controls.retranslate()
         self._cantilever_check.setText(t("cantilever"))
         self._expected_check.setText(t("expected peaks"))
         for key, label in _PANEL_LABELS:
@@ -298,6 +320,9 @@ class LiveView(QWidget):
         self._accel_true.setData(t, a_t)
         self._accel_rec.setData(t, a_r)
 
+        # (the local `t` below shadows the i18n helper, so the title is reset
+        # through a small method rather than inline)
+        self._reset_detector_title()
         det = np.asarray(artifacts.forward.detector.samples, dtype=np.float64)
         (det_d,) = _decimate(det)
         det_stride = max(1, det.size // det_d.size)
@@ -345,6 +370,71 @@ class LiveView(QWidget):
                     pen=pg.mkPen(color, width=1, style=Qt.PenStyle.DashLine),
                     name=t(key),
                 )
+
+    # ------------------------------------------------------------------ #
+    # Real-time mode (task O-SW-03)
+    # ------------------------------------------------------------------ #
+    @property
+    def controls(self) -> LiveControls:
+        """The live-stream control bar (start/stop, source, rate, provenance)."""
+        return self._controls
+
+    def show_stream_frame(self, frame: StreamFrame) -> None:
+        """Redraw the panels from one live frame and show its provenance.
+
+        Parameters
+        ----------
+        frame : StreamFrame
+            A snapshot produced by the streaming worker. Nothing is computed
+            here (09 §9): the traces, the spectrum and the provenance all
+            arrive ready-made, and the trace is bounded by the streaming
+            window, so this stays O(window) however long the stream runs.
+        """
+        result = frame.result
+        fs = result.fs
+        a = np.asarray(result.a, dtype=np.float64)
+        if a.size:
+            (a_d,) = _decimate(a)
+            t_a = np.arange(a_d.size) * (max(1, a.size // a_d.size) / fs)
+            self._accel_rec.setData(t_a, a_d)
+        self._accel_true.setData([], [])
+
+        v = np.asarray(result.v, dtype=np.float64)
+        x = np.asarray(result.x, dtype=np.float64)
+        if v.size and x.size:
+            v_d, x_d = _decimate(v, x)
+            t_vx = np.arange(v_d.size) * (max(1, v.size // v_d.size) / fs)
+            self._vel.setData(t_vx, v_d)
+            self._disp.setData(t_vx, x_d)
+
+        if result.spectrum is not None:
+            self._spec.setData(result.spectrum.freq.tolist(), result.spectrum.values.tolist())
+        self._controls.show_frame(frame)
+
+    def _reset_detector_title(self) -> None:
+        """Restore the detector panel title of the finished-run layout."""
+        self._p_det.setTitle(t("Detector signal"))
+
+    def begin_stream(self) -> None:
+        """Switch the panels into streaming mode (clear what does not apply)."""
+        self._accel_true.setData([], [])
+        self._det.setData([], [])
+        self._p_det.setTitle(tr("live.stream.det_off"))
+        self._cantilever.clear_motion()
+        self._controls.set_running(True)
+
+    def end_stream(self, message: str | None = None) -> None:
+        """Leave streaming mode, keeping the last frame on the panels.
+
+        Parameters
+        ----------
+        message : str or None, optional
+            Provenance line to leave behind (an error, typically); ``None``
+            keeps the last frame's line.
+        """
+        self._controls.set_running(False)
+        if message is not None:
+            self._controls.reset_provenance(message)
 
     def show_result(self, result: VibrationResult) -> None:
         """Minimal S0-compatible render (recovered acceleration + spectrum)."""

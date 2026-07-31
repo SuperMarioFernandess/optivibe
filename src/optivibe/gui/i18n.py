@@ -1371,6 +1371,68 @@ CATALOG: dict[str, dict[str, str]] = {
         "NEA(f) с плато дробового / RIN / джонсоновского / теплового",
     ),
     "live.axis.input": _e("input", "вход"),
+    # ------------------------------------------------------------------ #
+    # Live tab: real-time oscilloscope (task O-SW-03)
+    # ------------------------------------------------------------------ #
+    "live.stream.start": _e("Start live", "Запустить"),
+    "live.stream.stop": _e("Stop live", "Остановить"),
+    "live.stream.source": _e("source", "источник"),
+    "live.stream.rate": _e("rate", "темп"),
+    "live.stream.src.scenario": _e("synthetic scenario", "синтетический сценарий"),
+    "live.stream.src.record": _e("recorded capture", "запись прибора"),
+    "live.stream.speed.realtime": _e("real time", "реальный темп"),
+    "live.stream.speed.max": _e("as fast as possible", "максимально быстро"),
+    "live.stream.once": _e("play once", "один проход"),
+    "live.stream.loop": _e("loop", "зациклить"),
+    "live.stream.spec": _e("Spec...", "Спека..."),
+    "live.stream.open_spec": _e("Open analyze spec", "Открыть спеку анализа"),
+    "live.stream.yaml_filter": _e("YAML files (*.yaml *.yml)", "Файлы YAML (*.yaml *.yml)"),
+    "live.stream.rate.title": _e("Update rate", "Темп обновления"),
+    "live.stream.rate.help": _e(
+        "Frames per second handed to the display. The reference streaming profile is "
+        "N = 10/s (theory-06 §5.5): smooth for a human and at or below the rate at "
+        "which the running spectrum itself is refreshed.",
+        "Кадров в секунду, выдаваемых на экран. Эталонный профиль потока — "
+        "N = 10/с (theory-06 §5.5): плавно для человека и не выше темпа, с которым "
+        "обновляется сам бегущий спектр.",
+    ),
+    "live.stream.idle": _e(
+        "Idle. Start a stream to see live provenance (warm-up, dropped samples).",
+        "Простой. Запустите поток, чтобы видеть живой провенанс (прогрев, пропуски).",
+    ),
+    "live.stream.provenance": _e(
+        "{source} | {warmed} | dropped: {dropped} | t = {elapsed} s | window {window} ms",
+        "{source} | {warmed} | пропуски: {dropped} | t = {elapsed} с | окно {window} мс",
+    ),
+    "live.stream.warmed": _e("warmed up", "прогрет"),
+    "live.stream.warming": _e("WARMING UP - numbers not final", "ПРОГРЕВ — числа не окончательны"),
+    "live.stream.dropped_na": _e("n/a (no clock)", "н/д (без часов)"),
+    "live.stream.loops": _e("loops: {n}", "оборотов: {n}"),
+    "live.stream.seam": _e(
+        "LOOP SEAM - this frame straddles the splice, its wide-band splatter is an artifact",
+        "СТЫК ЦИКЛА — кадр захватывает склейку, широкополосный всплеск в нём — артефакт",
+    ),
+    "live.stream.no_spec": _e("choose spec...", "выберите спеку..."),
+    "live.stream.det_off": _e(
+        "Detector signal - not streamed in live mode",
+        "Сигнал детектора — в живом режиме не транслируется",
+    ),
+    "status.live_started": _e("Live: streaming {label}", "Живой режим: транслируется {label}"),
+    "status.live_stopped": _e("Live: stream stopped.", "Живой режим: поток остановлен."),
+    "status.live_failed": _e("Live: stream failed - {message}", "Живой режим: сбой — {message}"),
+    "status.live_busy": _e(
+        "A run is in progress - wait for it to finish before streaming.",
+        "Идёт прогон — дождитесь его окончания перед запуском потока.",
+    ),
+    "status.job_live_busy": _e(
+        "A live stream is running - stop it before starting a run.",
+        "Идёт живой поток — остановите его перед запуском прогона.",
+    ),
+    "status.live_no_spec": _e(
+        "Pick an analyze spec (kind: analyze) describing the record to replay.",
+        "Выберите спеку анализа (kind: analyze) с описанием воспроизводимой записи.",
+    ),
+    "status.live_bad_spec": _e("Invalid analyze spec: {exc}", "Некорректная спека анализа: {exc}"),
     # ================================================================== #
     # Report tab
     # ================================================================== #

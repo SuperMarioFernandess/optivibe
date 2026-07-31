@@ -1,8 +1,8 @@
-"""Tests for the S-03 real-time streaming layer (doc 06 §5/§7, SW-67).
+"""Tests for the S-03 real-time streaming layer (theory-06 §5/§7, SW-67).
 
 Increment 1 covers the causal :class:`~optivibe.dsp.streaming.LeakyIntegrator`:
 seam-invariance (feeding a signal in arbitrary frames returns the same samples
-as one call -- the bit-exact criterion doc 06 §7.6-ii at the integrator level),
+as one call -- the bit-exact criterion theory-06 §7.6-ii at the integrator level),
 in-band amplitude/phase against the analytic ``1/(j omega)`` integral (doc 11 §7
 inverse <= 2 %), and drift suppression (the leak keeps a DC offset from ramping
 away). The batch path is untouched; these are additive.
@@ -64,7 +64,7 @@ def test_leaky_pole_and_dc_gain_are_finite() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Seam-invariance (doc 06 §7.6-ii, at the integrator level -- bit-exact).
+# Seam-invariance (theory-06 §7.6-ii, at the integrator level -- bit-exact).
 # --------------------------------------------------------------------------- #
 def test_leaky_seam_invariance_two_chunks() -> None:
     """One call == split into two carried calls, bit-for-bit."""
@@ -145,14 +145,14 @@ def test_leaky_integrates_tone_phase_lag() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Drift suppression: the leak keeps a DC offset from ramping (doc 06 §3.2).
+# Drift suppression: the leak keeps a DC offset from ramping (theory-06 §3.2).
 # --------------------------------------------------------------------------- #
 def test_leaky_suppresses_dc_drift() -> None:
     """A DC offset produces a *bounded* pedestal, not an unbounded ramp.
 
     An ideal integrator would ramp a DC offset as ``dc * t`` (>= 2.0 at t = 4 s
     and growing). The leak instead bounds the DC response to the finite
-    ``dc_gain = dt / (1 - alpha)`` (doc 06 §3.6) -- a constant, settled pedestal
+    ``dc_gain = dt / (1 - alpha)`` (theory-06 §3.6) -- a constant, settled pedestal
     that does not grow. It sits below the assessment band, so it does not affect
     ``band_rms_velocity``; for real acceleration (DC ~ 0) it is negligible.
     """
@@ -173,7 +173,7 @@ def test_leaky_suppresses_dc_drift() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# StreamingSpectrum (doc 06 §5.2): ring buffer + exponential-averaged PSD.
+# StreamingSpectrum (theory-06 §5.2): ring buffer + exponential-averaged PSD.
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize(
     ("kwargs", "match"),
@@ -248,7 +248,7 @@ def test_streaming_spectrum_recovers_tone_and_power() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# StreamingDsp orchestrator (doc 06 §5.4) + replay_record driver.
+# StreamingDsp orchestrator (theory-06 §5.4) + replay_record driver.
 # --------------------------------------------------------------------------- #
 STREAM_FS = 40_000.0  # > 2 * f_max (variant B band to 10 kHz)
 
@@ -284,7 +284,7 @@ def _tone_detector(
 
 
 def test_streaming_calibration_bit_exact(variant_b: VariantConfig, constants: Constants) -> None:
-    """Streaming calibration (samples -> a) is bit-identical to batch (doc 06 §7.6-i)."""
+    """Streaming calibration (samples -> a) is bit-identical to batch (theory-06 §7.6-i)."""
     det = _tone_detector(variant_b, constants)
     opts = DspOptions()
     batch = StandardDsp(constants=constants).run(det, variant_b, opts)
@@ -295,7 +295,7 @@ def test_streaming_calibration_bit_exact(variant_b: VariantConfig, constants: Co
 def test_streaming_seam_invariance_orchestrator(
     variant_b: VariantConfig, constants: Constants
 ) -> None:
-    """Replaying in different block sizes yields identical a/v/x and metrics (doc 06 §7.6-ii)."""
+    """Replaying in different block sizes yields identical a/v/x and metrics (theory-06 §7.6-ii)."""
     det = _tone_detector(variant_b, constants)
     opts = DspOptions()
     r100 = replay_record(det, variant_b, opts, block_size=100, constants=constants, nperseg=4096)
@@ -361,14 +361,14 @@ def test_streaming_uses_f_c_stream_override(variant_b: VariantConfig, constants:
 
 
 # --------------------------------------------------------------------------- #
-# MAIN ACCEPTANCE GOLDEN: batch <-> stream equivalence (doc 06 §7.6).
+# MAIN ACCEPTANCE GOLDEN: batch <-> stream equivalence (theory-06 §7.6).
 #
 # (i)   calibration bit-exact               -> test_streaming_calibration_bit_exact
 # (ii)  seam-invariance bit-exact           -> test_streaming_seam_invariance_*
 # (iii) in-band metrics within doc 11 §7, after warm-up (this test), tied to the
 #       analytic v = A/omega, x = A/omega^2 formulas (base formulas, 18 §5(g)).
 # The integration stage is NOT bit-exact vs batch (batch is non-causal); that is
-# excluded by construction (doc 06 §3.6/§7.6).
+# excluded by construction (theory-06 §3.6/§7.6).
 # --------------------------------------------------------------------------- #
 def test_batch_stream_equivalence_golden(variant_b: VariantConfig, constants: Constants) -> None:
     """Streaming metrics equal batch and the analytic tone, in band, after warm-up."""
@@ -398,7 +398,7 @@ def test_batch_stream_equivalence_golden(variant_b: VariantConfig, constants: Co
 
     # After warm-up, the causal v and x match the analytic integrals (and batch)
     # within doc 11 §7 (<= 2 %); the whole-signal RMS(x) differs only by the
-    # double-integration start-up transient (doc 06 §7.6: results before warm-up
+    # double-integration start-up transient (theory-06 §7.6: results before warm-up
     # are not graded).
     warm = int(2.0 * STREAM_FS)
     v_rms_stream = float(np.sqrt(np.mean(stream.v[warm:] ** 2)))
@@ -427,6 +427,147 @@ def test_streaming_keep_history_false_bounded_trace(
     assert snap.v.size == nperseg
     assert snap.iso is not None
     assert stream.n_samples == det.samples.size  # running stats still see everything
+
+
+# --------------------------------------------------------------------------- #
+# Bounded display history (O-SW-03): the trace window is configurable, and the
+# default is the pre-existing behaviour to the bit.
+# --------------------------------------------------------------------------- #
+def test_streaming_history_default_is_the_previous_window_bit_for_bit(
+    variant_b: VariantConfig, constants: Constants
+) -> None:
+    """``history_samples=None`` reproduces the ``nperseg`` trace exactly.
+
+    Pins the compatibility claim of the O-SW-03 extension by test rather than
+    by declaration: the default path must stay bit-identical to the bounded
+    trace S-03 shipped (the last ``nperseg`` samples of the stream).
+    """
+    det = _tone_detector(variant_b, constants, seconds=2.0)
+    nperseg = 1024
+    reference = replay_record(
+        det, variant_b, DspOptions(), block_size=333, constants=constants, nperseg=nperseg
+    )
+    stream = StreamingDsp(
+        det, variant_b, DspOptions(), constants=constants, nperseg=nperseg, keep_history=False
+    )
+    for start in range(0, det.samples.size, 333):
+        stream.process(det.samples[start : start + 333])
+    snap = stream.snapshot()
+    assert snap.a.size == nperseg
+    np.testing.assert_array_equal(snap.a, reference.a[-nperseg:])
+    np.testing.assert_array_equal(snap.v, reference.v[-nperseg:])
+    np.testing.assert_array_equal(snap.x, reference.x[-nperseg:])
+
+
+def test_streaming_history_samples_widens_only_the_trace(
+    variant_b: VariantConfig, constants: Constants
+) -> None:
+    """A longer window moves the trace and *nothing else* (theory-06 §5.7).
+
+    The oscilloscope needs seconds of signal where the spectral frame is tens of
+    milliseconds; the extension may buy that only if the spectra, the running
+    metrics and the integrator states stay exactly where they were.
+    """
+    det = _tone_detector(variant_b, constants, seconds=2.0)
+    nperseg = 1024
+    window = 8192
+    narrow = StreamingDsp(
+        det, variant_b, DspOptions(), constants=constants, nperseg=nperseg, keep_history=False
+    )
+    wide = StreamingDsp(
+        det,
+        variant_b,
+        DspOptions(),
+        constants=constants,
+        nperseg=nperseg,
+        keep_history=False,
+        history_samples=window,
+    )
+    narrow.process(det.samples)
+    wide.process(det.samples)
+    narrow_snap, wide_snap = narrow.snapshot(), wide.snapshot()
+
+    assert narrow.trace_samples == nperseg
+    assert wide.trace_samples == window
+    assert wide_snap.a.size == window
+    # The wider trace ends on the same samples the narrow one shows.
+    np.testing.assert_array_equal(wide_snap.a[-nperseg:], narrow_snap.a)
+    # Everything that is not the trace is identical.
+    assert wide_snap.rms == narrow_snap.rms
+    assert wide_snap.dominant_freqs_hz == narrow_snap.dominant_freqs_hz
+    assert narrow_snap.spectrum is not None
+    assert wide_snap.spectrum is not None
+    np.testing.assert_array_equal(wide_snap.spectrum.values, narrow_snap.spectrum.values)
+
+
+def test_streaming_history_memory_stays_bounded(
+    variant_b: VariantConfig, constants: Constants
+) -> None:
+    """An endless stream never grows the trace: the ring is pre-allocated.
+
+    The bounded mode exists precisely to remove a cost that grows with the
+    stream, so the window must hold after many times its own length has gone
+    through (the failure mode a growing list of blocks would reintroduce).
+    """
+    det = _tone_detector(variant_b, constants, seconds=1.0)
+    window = 4096
+    stream = StreamingDsp(
+        det,
+        variant_b,
+        DspOptions(),
+        constants=constants,
+        nperseg=1024,
+        keep_history=False,
+        history_samples=window,
+    )
+    block = 512
+    fed = 0
+    sizes = []
+    for _cycle in range(20):  # ~20x the record, ~100x the window
+        for start in range(0, det.samples.size, block):
+            stream.process(det.samples[start : start + block])
+            fed += det.samples[start : start + block].size
+        sizes.append(stream.snapshot().a.size)
+    assert fed > 100 * window
+    assert set(sizes) == {window}
+    assert stream.n_samples == fed
+
+
+def test_streaming_snapshot_before_any_data_has_no_trace(
+    variant_b: VariantConfig, constants: Constants
+) -> None:
+    """A snapshot taken before the first block has nothing to show.
+
+    Pre-existing S-03 behaviour (the ``VibrationResult`` contract rejects empty
+    traces), pinned here because the live loop relies on it: it must not emit a
+    frame before the first block, or a stop honoured immediately would surface
+    as a failed stream instead of a stopped one.
+    """
+    det = _tone_detector(variant_b, constants, seconds=0.2)
+    stream = StreamingDsp(
+        det, variant_b, DspOptions(), constants=constants, nperseg=1024, keep_history=False
+    )
+    assert stream.n_samples == 0
+    with pytest.raises(ValueError, match="non-empty"):
+        stream.snapshot()
+
+
+def test_streaming_history_samples_rejects_bad_values(
+    variant_b: VariantConfig, constants: Constants
+) -> None:
+    """The window is meaningless without a bound, and must be positive."""
+    det = _tone_detector(variant_b, constants, seconds=0.2)
+    with pytest.raises(ValueError, match="keep_history=False"):
+        StreamingDsp(det, variant_b, DspOptions(), constants=constants, history_samples=1024)
+    with pytest.raises(ValueError, match="history_samples"):
+        StreamingDsp(
+            det,
+            variant_b,
+            DspOptions(),
+            constants=constants,
+            keep_history=False,
+            history_samples=0,
+        )
 
 
 # --------------------------------------------------------------------------- #
