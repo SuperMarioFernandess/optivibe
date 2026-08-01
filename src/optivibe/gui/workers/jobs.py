@@ -25,12 +25,17 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from optivibe.analysis import (
+    ChainSpec,
+    ComparisonResult,
     ErrorBudget,
     MonteCarloResult,
     MonteCarloSpec,
     NeaBudget,
     SweepResult,
     SweepSpec,
+    compare_chains,
+    input_from_analyze_spec,
+    input_from_scenario,
     nea_budget,
     run_monte_carlo,
     run_sweep,
@@ -51,6 +56,7 @@ ProgressFn = Callable[[str], None]
 CancelFn = Callable[[], bool]
 
 __all__ = [
+    "CompareJob",
     "Job",
     "MonteCarloJob",
     "ReportBundle",
@@ -226,6 +232,74 @@ class ScenarioJob:
             is_cancelled=is_cancelled,
             system=self.system,
         )
+
+
+@dataclass(frozen=True)
+class CompareJob:
+    """Run several DSP chains over one common input (task S-22 W-2).
+
+    The comparison is a *batch* job on purpose: it needs the same samples fed
+    to every chain, and only a finite record gives that. The input is opened
+    here, on the worker thread, exactly the way the live oscilloscope and the
+    ``analyze`` command open theirs -- a synthetic input is the forward chain of
+    the scenario, a recorded one goes through the analyze spec (one data path,
+    module docstring of :mod:`optivibe.analysis.compare`), so a difference in
+    the numbers can only come from the chains.
+
+    Parameters
+    ----------
+    chains : tuple of ChainSpec
+        Chains to run; the first is the reference of the diff table.
+    scenario : ScenarioConfig or None, optional
+        Synthetic input assembled by the panel (mutually exclusive with
+        ``spec_path``).
+    system : SystemConfig or None, optional
+        Edited composition to resolve instead of loading the named variant.
+    spec_path : pathlib.Path or None, optional
+        Path to a ``kind: analyze`` spec describing a recorded input.
+    config_dir : pathlib.Path or None, optional
+        Override for the ``configs/`` directory.
+    """
+
+    chains: tuple[ChainSpec, ...]
+    scenario: ScenarioConfig | None = None
+    system: SystemConfig | None = None
+    spec_path: Path | None = None
+    config_dir: Path | None = None
+    name: str = "comparison"
+    label: str = "compare DSP chains"
+
+    def run(self, *, progress: ProgressFn, is_cancelled: CancelFn) -> object:
+        """Open the common input and run every chain over it.
+
+        Returns
+        -------
+        ComparisonResult
+            Chains, their metrics and the diff table (17 §1).
+
+        Raises
+        ------
+        ValueError
+            If neither a scenario nor a record spec was given.
+        """
+        progress("opening the common input")
+        if self.spec_path is not None:
+            source = input_from_analyze_spec(self.spec_path, config_dir=self.config_dir)
+        elif self.scenario is not None:
+            variant = (
+                resolve_system_variant(self.system, self.config_dir or default_config_dir())
+                if self.system is not None
+                else load_variant(self.scenario.variant, self.config_dir)
+            )
+            source = input_from_scenario(self.scenario, variant)
+        else:
+            msg = "a comparison needs either a scenario or an analyze spec"
+            raise ValueError(msg)
+        if is_cancelled():
+            logger.debug("comparison cancelled after opening the input")
+        progress(f"running {len(self.chains)} chains")
+        result: ComparisonResult = compare_chains(source, self.chains, name=self.name)
+        return result
 
 
 @dataclass(frozen=True)

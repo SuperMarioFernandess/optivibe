@@ -603,7 +603,11 @@ class StreamingDsp:
         a, v, x = self._traces()
 
         spec_a = self._spec_a.spectrum()
-        dominant = dominant_frequencies(spec_a) if spec_a is not None else ()
+        dominant = (
+            dominant_frequencies(spec_a, interpolate=self._options.peak_interpolation)
+            if spec_a is not None
+            else ()
+        )
 
         cross_residual: dict[str, float] = {}
         if dominant and a.size:

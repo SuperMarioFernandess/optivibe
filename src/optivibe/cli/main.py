@@ -16,6 +16,10 @@ Subcommands
     Analyze a recorded real-instrument output (photocurrent record + instrument
     config -> the 17 §1 metrics through the standard inverse chain, bypassing
     the forward model): role S-02, doc 20 §5.
+``compare <spec.yaml>``
+    Run several DSP chains over one common input and print the metric diff
+    table of 17 §1, with the ``verified`` / ``experimental`` verdict of each
+    chain: the head-less half of the comparison bench (task S-22, backlog 16).
 ``ingest <sidecar.yaml ...>``
     Apply measured characterization artifacts (phase 0, doc 20 §1) to a base
     composition and write the measurement-backed twin configuration plus its
@@ -40,8 +44,11 @@ from optivibe.analysis import (
     analyze_record,
     load_analysis_spec,
     load_analyze_spec,
+    load_compare_spec,
     nea_budget,
     predict_expected_peaks,
+    provenance_yaml,
+    run_comparison,
     run_monte_carlo,
     run_sweep,
     save_monte_carlo_npz,
@@ -109,6 +116,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--config-dir", type=Path, default=None, help="override the configs/ dir"
     )
     analyze_p.set_defaults(func=_cmd_analyze)
+
+    compare_p = sub.add_parser(
+        "compare", help="compare DSP chains over one common input (task S-22)"
+    )
+    compare_p.add_argument("spec", type=Path, help="path to a compare spec YAML (kind: compare)")
+    compare_p.add_argument(
+        "--config-dir", type=Path, default=None, help="override the configs/ dir"
+    )
+    compare_p.add_argument(
+        "--provenance",
+        type=Path,
+        default=None,
+        help="also write the chain provenance (verdict + full deviation list) to this YAML",
+    )
+    compare_p.set_defaults(func=_cmd_compare)
 
     ingest_p = sub.add_parser(
         "ingest", help="apply measured characterization artifacts to a composition (S-13)"
@@ -375,6 +397,28 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
         logger.error("analyze failed: %s", exc)
         return 2
     sys.stdout.write(_format_analysis(analysis) + "\n")
+    return 0
+
+
+def _cmd_compare(args: argparse.Namespace) -> int:
+    """Execute the ``compare`` subcommand (task S-22: one input, several chains).
+
+    Config-first by construction: the comparison is a YAML, so the experiment
+    the GUI panel assembles is reproducible here and transferable to someone
+    else. The verdict printed next to each chain is computed from the options
+    (:func:`~optivibe.analysis.compare.chain_status`), never declared.
+    """
+    try:
+        spec = load_compare_spec(args.spec)
+        result = run_comparison(spec, config_dir=args.config_dir)
+    except (FileNotFoundError, ValueError, KeyError) as exc:
+        logger.error("compare failed: %s", exc)
+        return 2
+    sys.stdout.write(result.as_text() + "\n")
+    if args.provenance is not None:
+        args.provenance.parent.mkdir(parents=True, exist_ok=True)
+        args.provenance.write_text(provenance_yaml(result.provenance()))
+        sys.stdout.write(f"provenance written to {args.provenance}\n")
     return 0
 
 

@@ -6,8 +6,8 @@ one form per subsystem with presets and overrides) rather than a single A/B/C/D
 combo; the A/B/C/D variants survive as *starting compositions*. Since the S-13b
 polish the parameter area is a single :class:`QTabWidget`: the composition panel
 provides the *System* + subsystem tabs and this widget appends the *Excitation*,
-*Physics layers* and *Reproducibility* pages -- the previous one-column stack was
-overloaded. Every row carries a faint ``?`` reference note
+*Physics layers*, *DSP experiment* and *Reproducibility* pages -- the previous
+one-column stack was overloaded. Every row carries a faint ``?`` reference note
 (:func:`~optivibe.gui.widgets.ui_helpers.with_help`), and the mouse wheel is
 guarded app-wide so skimming the panel can never silently edit a combo or spin
 box (:func:`~optivibe.gui.widgets.ui_helpers.install_wheel_guard`).
@@ -20,7 +20,16 @@ tab), mechanics, the detector (``photodiode`` / ``stub``), the DSP
 seed. The physical *parameters* live in the composition tabs; in particular the
 detector's ``balanced`` / reference-arm settings live solely in the Detector tab
 (``variant.detector``), so the scenario emits **no** detector override -- one
-source of truth (S7-mod cleanup). The controls assemble a scenario *payload*
+source of truth (S7-mod cleanup). The inverse chain itself is edited on the *DSP experiment* tab
+(:class:`~optivibe.gui.widgets.dsp_controls.DspControls`, task S-22 W-1), which
+owns the ``DspOptions`` values and grades them verified / experimental. The two
+older selectors on *Physics layers* (sensitivity model and integrator) stay
+where users expect them but are **mirrors**, not copies: they read and write the
+same options object, so the two tabs can never disagree (owner decision R-1,
+2026-08-01; pinned by test). For the same reason the scenario payload no longer
+hard-codes ``spectrum_method``/``window``/``sensitivity_freq`` -- those come
+from the model, whose defaults are unchanged, so a default run stays
+bit-identical. The controls assemble a scenario *payload*
 for :func:`optivibe.gui.controllers.scenario_builder.build_scenario_config` and
 a composition payload for
 :func:`optivibe.gui.controllers.system_builder.build_system_config`. No physics
@@ -42,7 +51,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from optivibe.core.config.models import DspOptions
 from optivibe.gui.i18n import t
+from optivibe.gui.widgets.dsp_controls import DspControls
 from optivibe.gui.widgets.excitation_builder import ExcitationBuilder
 from optivibe.gui.widgets.subsystem_forms import SystemBuilderPanel
 from optivibe.gui.widgets.ui_helpers import install_wheel_guard, with_help
@@ -74,16 +85,19 @@ _DSP_HELP = (
     "integrator selectors below apply to the standard DSP only."
 )
 _SENSITIVITY_HELP = (
-    "How the standard DSP obtains the scalar sensitivity s_target: 'static' "
+    "Mirror of the same control on the DSP experiment tab (one value, two "
+    "places). How the standard DSP obtains the scalar sensitivity s_target: 'static' "
     "-- the design-point derivative; 'operating_point' -- re-evaluated at the "
     "resolved working point (bias, gap); 'nonlinear_curve' -- inverted "
     "through the full eta(x) curve (handles large drive amplitudes)."
 )
 _INTEGRATOR_HELP = (
-    "Acceleration -> velocity/displacement integration: 'frequency' -- "
+    "Mirror of the same control on the DSP experiment tab (one value, two "
+    "places). Acceleration -> velocity/displacement integration: 'frequency' -- "
     "division by (i omega) in the spectrum (fast, exact for stationary "
     "signals); 'time' -- time-domain integration with detrending (better for "
-    "transients/shocks)."
+    "transients/shocks); 'leaky' -- the causal scheme of the live mode over a "
+    "whole record (for comparing what causality costs)."
 )
 _SEED_ENABLED_HELP = (
     "Fix the random seed of the noise and random-excitation generators. "
@@ -125,7 +139,10 @@ class ControlPanel(QWidget):
         self._detector = self._combo(("photodiode", "stub"))
         self._dsp = self._combo(("standard", "stub"))
         self._sensitivity = self._combo(("static", "operating_point", "nonlinear_curve"))
-        self._integrator = self._combo(("frequency", "time"))
+        self._integrator = self._combo(("frequency", "time", "leaky"))
+        # Owner of the DspOptions values (S-22 W-1); the two combos above mirror it.
+        self._experiment = DspControls()
+        self._mirroring = False
 
         self._seed_enabled = QCheckBox(t("fixed seed"))
         self._seed_enabled.setChecked(True)
@@ -134,10 +151,14 @@ class ControlPanel(QWidget):
         self._seed.setValue(7)
 
         self._dsp.currentTextChanged.connect(self._on_dsp_changed)
+        self._experiment.changed.connect(self._mirror_from_experiment)
+        self._sensitivity.currentTextChanged.connect(self._mirror_to_experiment)
+        self._integrator.currentTextChanged.connect(self._mirror_to_experiment)
 
         # One flat tab set: the composition panel's tabs + our three pages.
         self._system.addTab(self._excitation_page(), t("Excitation"))
         self._system.addTab(self._stages_page(), t("Physics layers"))
+        self._system.addTab(self._experiment_page(), t("DSP experiment"))
         self._system.addTab(self._run_page(), t("Reproducibility"))
 
         layout = QVBoxLayout(self)
@@ -190,6 +211,14 @@ class ControlPanel(QWidget):
         layout.addStretch(1)
         return page
 
+    def _experiment_page(self) -> QWidget:
+        """Build the DSP-experiment page (the inverse chain, task S-22 W-1)."""
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.addWidget(self._experiment)
+        layout.addStretch(1)
+        return page
+
     def _run_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -202,10 +231,52 @@ class ControlPanel(QWidget):
         return page
 
     def _on_dsp_changed(self, key: str) -> None:
-        """Enable sensitivity / integrator controls only for the standard DSP."""
+        """Enable the chain controls only for the standard DSP (the stub has none)."""
         is_standard = key == "standard"
         self._sensitivity.setEnabled(is_standard)
         self._integrator.setEnabled(is_standard)
+        self._experiment.set_chain_enabled(is_standard)
+
+    def _mirror_from_experiment(self) -> None:
+        """Push the experiment panel's values into the Physics-layers mirrors."""
+        if self._mirroring:
+            return
+        self._mirroring = True
+        try:
+            options = self._experiment.dsp_options()
+            for combo, value in (
+                (self._sensitivity, options.sensitivity_model),
+                (self._integrator, options.integrator),
+            ):
+                if combo.currentText() != value:
+                    combo.setCurrentText(value)
+        finally:
+            self._mirroring = False
+
+    def _mirror_to_experiment(self) -> None:
+        """Push a Physics-layers mirror edit back into the experiment panel."""
+        if self._mirroring:
+            return
+        self._mirroring = True
+        try:
+            options = self._experiment.dsp_options().model_copy(
+                update={
+                    "sensitivity_model": self._sensitivity.currentText(),
+                    "integrator": self._integrator.currentText(),
+                }
+            )
+            self._experiment.set_dsp_options(options)
+        finally:
+            self._mirroring = False
+
+    @property
+    def experiment(self) -> DspControls:
+        """The DSP-experiment panel (owner of the chain; exposed for tests)."""
+        return self._experiment
+
+    def dsp_options(self) -> DspOptions:
+        """Return the inverse-chain options currently selected."""
+        return self._experiment.dsp_options()
 
     @property
     def system(self) -> SystemBuilderPanel:
@@ -248,13 +319,7 @@ class ControlPanel(QWidget):
                 "detector": self._detector.currentText(),
                 "dsp": self._dsp.currentText(),
             },
-            "dsp": {
-                "integrator": self._integrator.currentText(),
-                "spectrum_method": "fft",
-                "window": "hann",
-                "sensitivity_model": self._sensitivity.currentText(),
-                "sensitivity_freq": "plateau",
-            },
+            "dsp": self._experiment.dsp_payload(),
             "seed": self._seed.value() if self._seed_enabled.isChecked() else None,
         }
 
@@ -275,11 +340,10 @@ class ControlPanel(QWidget):
             index = self._optics.findData(str(stages["optics"]))
             if index >= 0:
                 self._optics.setCurrentIndex(index)
-        dsp = payload.get("dsp", {})
-        if "sensitivity_model" in dsp:
-            self._sensitivity.setCurrentText(str(dsp["sensitivity_model"]))
-        if "integrator" in dsp:
-            self._integrator.setCurrentText(str(dsp["integrator"]))
+        dsp = payload.get("dsp")
+        if isinstance(dsp, dict):
+            self._experiment.load_payload(dsp)
+            self._mirror_from_experiment()
         seed = payload.get("seed")
         self._seed_enabled.setChecked(seed is not None)
         if seed is not None:

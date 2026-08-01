@@ -175,7 +175,11 @@ def _parabolic_peak(freq: FloatArray, magnitude: FloatArray, index: int) -> floa
 
 
 def dominant_frequencies(
-    spectrum: Spectrum, *, max_peaks: int = 3, min_prominence_ratio: float = 0.1
+    spectrum: Spectrum,
+    *,
+    max_peaks: int = 3,
+    min_prominence_ratio: float = 0.1,
+    interpolate: bool = True,
 ) -> tuple[float, ...]:
     """Most prominent spectral peaks, Hz, ordered by prominence (S5 §3).
 
@@ -183,6 +187,14 @@ def dominant_frequencies(
     :func:`scipy.signal.find_peaks`, ranked by prominence and refined by
     parabolic interpolation. A peak must clear ``min_prominence_ratio`` of the
     peak magnitude to count, which rejects noise ripple.
+
+    Sub-bin interpolation can be switched off (``interpolate=False``), which
+    reports the bare bin centre. The switch is a teaching knob of the comparison
+    bench (task S-22 W-3): a tone that does not sit on a bin is reported with an
+    error of up to half a bin width without it, and the quadratic fit is what
+    removes that error -- a difference the bench measures instead of asserting.
+    The default keeps the interpolated behaviour, so every existing acceptance
+    dominant is unchanged.
 
     Parameters
     ----------
@@ -193,6 +205,8 @@ def dominant_frequencies(
     min_prominence_ratio : float, optional
         Minimum peak prominence as a fraction of the maximum magnitude
         (default 0.1).
+    interpolate : bool, optional
+        Refine each peak by quadratic sub-bin interpolation (default ``True``).
 
     Returns
     -------
@@ -207,6 +221,11 @@ def dominant_frequencies(
             idx = int(np.argmax(mag[1:])) + 1
             return (float(freq[idx]),)
         return ()
+
+    def peak_at(index: int) -> float:
+        """Peak frequency at ``index``, interpolated or as the bare bin."""
+        return _parabolic_peak(freq, mag, index) if interpolate else float(freq[index])
+
     body = mag.copy()
     body[0] = 0.0  # ignore DC
     peak_max = float(np.max(body))
@@ -216,7 +235,7 @@ def dominant_frequencies(
     # leading line matches a plain argmax (regression with the S1-S4 dominants);
     # any further lines are the next most prominent peaks.
     global_idx = int(np.argmax(body))
-    dominant: list[float] = [_parabolic_peak(freq, mag, global_idx)]
+    dominant: list[float] = [peak_at(global_idx)]
     indices, props = find_peaks(body, prominence=min_prominence_ratio * peak_max)
     if indices.size:
         order = np.argsort(props["prominences"])[::-1]
@@ -224,7 +243,7 @@ def dominant_frequencies(
             idx = int(indices[i])
             if abs(idx - global_idx) <= 1:
                 continue  # already counted as the primary
-            dominant.append(_parabolic_peak(freq, mag, idx))
+            dominant.append(peak_at(idx))
             if len(dominant) >= max_peaks:
                 break
     return tuple(dominant)

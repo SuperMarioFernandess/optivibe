@@ -14,6 +14,7 @@ Report, ``SweepResult`` -> Sweeps, ``MonteCarloResult`` -> Monte-Carlo).
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
 from collections.abc import Callable
 from pathlib import Path
@@ -41,9 +42,13 @@ from PySide6.QtWidgets import (
 )
 
 from optivibe.analysis import (
+    ChainSpec,
+    ComparisonResult,
     MonteCarloResult,
     SweepResult,
+    chain_provenance,
     predict_expected_peaks,
+    provenance_yaml,
     save_monte_carlo_npz,
     save_sweep_npz,
 )
@@ -70,6 +75,7 @@ from optivibe.gui.i18n import (
 )
 from optivibe.gui.theme import THEMES, apply_theme
 from optivibe.gui.widgets import (
+    ComparePanel,
     ControlPanel,
     LiveView,
     MonteCarloPanel,
@@ -77,9 +83,11 @@ from optivibe.gui.widgets import (
     ReportPanel,
     SweepPanel,
 )
+from optivibe.gui.widgets.compare_panel import SOURCE_RECORD as COMPARE_SOURCE_RECORD
 from optivibe.gui.widgets.live_controls import SOURCE_RECORD
 from optivibe.gui.widgets.preferences_dialog import PreferencesDialog
 from optivibe.gui.workers.jobs import (
+    CompareJob,
     Job,
     MonteCarloJob,
     ReportBundle,
@@ -182,6 +190,8 @@ class MainWindow(QMainWindow):
         self._report = ReportPanel()
         self._sweep = SweepPanel()
         self._monte = MonteCarloPanel()
+        self._compare = ComparePanel()
+        self._compare.compare_requested.connect(self._on_compare)
         self._physics = PhysicsTab(self._panel, config_dir=config_dir)
         self._sweep.run_requested.connect(self._on_sweep)
         self._monte.run_requested.connect(self._on_monte_carlo)
@@ -204,6 +214,7 @@ class MainWindow(QMainWindow):
         self._tabs.addTab(self._report, t("Report"))
         self._tabs.addTab(self._sweep, t("Sweeps"))
         self._tabs.addTab(self._monte, t("Monte-Carlo"))
+        self._tabs.addTab(self._compare, t("Compare"))
         self._tabs.addTab(self._physics, t("Physics"))
         self._tabs.currentChanged.connect(self._on_tab_changed)
 
@@ -447,7 +458,7 @@ class MainWindow(QMainWindow):
         self._physics = new_physics
         self._tabs.addTab(self._physics, t("Physics"))
 
-        for panel in (self._live, self._report, self._sweep, self._monte):
+        for panel in (self._live, self._report, self._sweep, self._monte, self._compare):
             panel.retranslate()
         self._retranslate_chrome()
         self._tabs.setCurrentIndex(current_tab)
@@ -460,7 +471,7 @@ class MainWindow(QMainWindow):
         self._cancel_button.setText(t("Cancel"))
         self._export_button.setText(t("Export..."))
         self._check_button.setText(t("Check composition"))
-        for index, key in enumerate(("Live", "Report", "Sweeps", "Monte-Carlo")):
+        for index, key in enumerate(("Live", "Report", "Sweeps", "Monte-Carlo", "Compare")):
             self._tabs.setTabText(index, t(key))
         self._log_dock.setWindowTitle(t("Log"))
         self._retranslate_menu()
@@ -533,6 +544,47 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(tr("status.invalid_mc", exc=exc))
             return
         self._start(MonteCarloJob(spec=spec), "monte-carlo")
+
+    def _on_compare(self) -> None:
+        """Compare two inverse chains over one input (task S-22 W-2).
+
+        Chain A is the chain edited on the *DSP experiment* tab -- the one the
+        ordinary Run would use -- and chain B is the variation on the Compare
+        tab, so the table always reads as "what this experiment costs against
+        what I would otherwise have run". The comparison itself is a job: it
+        walks the samples twice and therefore belongs off the UI thread (SW-06).
+        """
+        chain_a = ChainSpec(name=t("chain A"), dsp=self._panel.dsp_options())
+        chain_b = ChainSpec(name=t("chain B"), dsp=self._compare.chain_b_options())
+        spec_path: Path | None = None
+        scenario: ScenarioConfig | None = None
+        system: SystemConfig | None = None
+        if self._compare.source_kind() == COMPARE_SOURCE_RECORD:
+            chosen = self._compare.spec_path()
+            if chosen is None:
+                self.statusBar().showMessage(tr("status.live_no_spec"))
+                return
+            spec_path = Path(chosen)
+        else:
+            scenario = self._build_scenario()
+            if scenario is None:
+                return
+            system = self._build_system()
+            if system is None:
+                return
+        self._compare.set_busy(True)
+        self._compare.reset_status(tr("compare.running"))
+        self._start(
+            CompareJob(
+                chains=(chain_a, chain_b),
+                scenario=scenario,
+                system=system,
+                spec_path=spec_path,
+                config_dir=self._config_dir,
+                name=t("GUI comparison"),
+            ),
+            "compare",
+        )
 
     def _build_scenario(self) -> ScenarioConfig | None:
         """Validate the control-panel payload into a scenario (or report error)."""
@@ -619,6 +671,13 @@ class MainWindow(QMainWindow):
                     n=len(result.axis_labels),
                 )
             )
+        elif isinstance(result, ComparisonResult):
+            self._compare.set_busy(False)
+            self._compare.show_result(result)
+            self._tabs.setCurrentWidget(self._compare)
+            self.statusBar().showMessage(
+                tr("status.compare_done", n=len(result.chains), status=result.status)
+            )
         elif isinstance(result, MonteCarloResult):
             self._monte.show_result(result)
             self._tabs.setCurrentWidget(self._monte)
@@ -677,11 +736,15 @@ class MainWindow(QMainWindow):
     def _on_failed(self, message: str) -> None:
         """Report a failed job."""
         self._set_running(False)
+        self._compare.set_busy(False)
+        self._compare.reset_status(tr("compare.failed", message=message))
         self.statusBar().showMessage(tr("status.failed", message=message))
 
     def _on_cancelled(self) -> None:
         """Report a cancelled job (its result was dropped)."""
         self._set_running(False)
+        self._compare.set_busy(False)
+        self._compare.reset_status()
         self.statusBar().showMessage(tr("status.cancelled"))
 
     def _set_running(self, running: bool) -> None:
@@ -808,6 +871,7 @@ class MainWindow(QMainWindow):
             self._export_button,
         ):
             button.setEnabled(not streaming)
+        self._compare.set_busy(streaming)
 
     # ------------------------------------------------------------------ #
     # Export
@@ -858,6 +922,8 @@ class MainWindow(QMainWindow):
             fig = directory / f"{result.name}.png"
             plot_sweep(result).savefig(fig, dpi=120)
             written.append(fig)
+        elif isinstance(result, ComparisonResult):
+            written.extend(self._save_comparison(result, directory))
         elif isinstance(result, MonteCarloResult):
             written.append(save_monte_carlo_npz(result, directory / result.name))
             from optivibe.viz.analysis import plot_monte_carlo
@@ -869,9 +935,19 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _save_run_npz(artifacts: RunArtifacts, directory: Path) -> Path:
-        """Save a run's input + recovered signals as a ``.npz``."""
+        """Save a run's input + recovered signals as a ``.npz``.
+
+        The chain provenance travels **with** the numbers (task S-22, rule 1;
+        discipline S-13): the verdict, the full chain and its deviations from
+        the verified default are added as extra keys, so an exported experiment
+        cannot later be read as the output of the verified twin. The existing
+        keys are untouched -- older readers keep working.
+        """
         path = directory / "run_result.npz"
         result = artifacts.result
+        provenance = chain_provenance(
+            artifacts.scenario.dsp, input_label=f"scenario: {artifacts.scenario.name}"
+        )
         np.savez(
             path,
             a_input=artifacts.forward.excitation.a_x,
@@ -879,8 +955,48 @@ class MainWindow(QMainWindow):
             v_recovered=result.v,
             x_recovered=result.x,
             fs=result.fs,
+            chain_status=provenance["status"],
+            chain_provenance_json=json.dumps(provenance, ensure_ascii=False),
+        )
+        (directory / "run_provenance.yaml").write_text(
+            provenance_yaml(provenance), encoding="utf-8"
         )
         return path
+
+    @staticmethod
+    def _save_comparison(result: ComparisonResult, directory: Path) -> list[Path]:
+        """Export a comparison: per-chain traces, the diff table and provenance.
+
+        Every chain gets its own ``.npz`` named after it, the table goes out as
+        plain text, and the provenance file carries each chain's verdict and
+        deviations -- an experimental comparison is exported as such (rule 1).
+        """
+        written: list[Path] = []
+        for outcome in result.chains:
+            safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in outcome.name)
+            path = directory / f"compare_{safe}.npz"
+            np.savez(
+                path,
+                a_recovered=outcome.result.a,
+                v_recovered=outcome.result.v,
+                x_recovered=outcome.result.x,
+                fs=outcome.result.fs,
+                chain_status=outcome.status,
+                chain_provenance_json=json.dumps(
+                    chain_provenance(
+                        outcome.options, input_label=result.input_label, name=outcome.name
+                    ),
+                    ensure_ascii=False,
+                ),
+            )
+            written.append(path)
+        table = directory / "compare_table.txt"
+        table.write_text(result.as_text() + "\n", encoding="utf-8")
+        written.append(table)
+        provenance = directory / "compare_provenance.yaml"
+        provenance.write_text(provenance_yaml(result.provenance()), encoding="utf-8")
+        written.append(provenance)
+        return written
 
     # ------------------------------------------------------------------ #
     # Lifecycle / test accessors

@@ -76,8 +76,9 @@ def test_main_window_builds_tabs(qtbot) -> None:
     assert window.run_button is not None
     assert window.plot is not None
     assert window.controller is not None
-    # Live / Report / Sweeps / Monte-Carlo / Physics (task S7-mod §5).
-    assert window._tabs.count() == 5
+    # Live / Report / Sweeps / Monte-Carlo / Compare / Physics
+    # (task S7-mod §5; the Compare tab is task S-22 W-2).
+    assert window._tabs.count() == 6
 
 
 def test_control_panel_assembles_scenario(qtbot) -> None:
@@ -408,7 +409,11 @@ def test_live_nea_panel_draws_thermal_branch(qtbot) -> None:
 # loaders on their tabs, inline help, and the mouse-wheel guard.
 # --------------------------------------------------------------------------- #
 def test_parameter_panel_is_one_flat_tab_set(qtbot) -> None:
-    """The parameter area is a single tab widget with the nine agreed tabs."""
+    """The parameter area is a single tab widget with the agreed tabs.
+
+    The tenth tab is the DSP experiment page (task S-22 W-1): additive, after
+    the physics layers it belongs with, before reproducibility.
+    """
     from PySide6.QtWidgets import QTabWidget
 
     window = MainWindow()
@@ -425,6 +430,7 @@ def test_parameter_panel_is_one_flat_tab_set(qtbot) -> None:
         "Detector",
         "Excitation",
         "Physics layers",
+        "DSP experiment",
         "Reproducibility",
     ]
 

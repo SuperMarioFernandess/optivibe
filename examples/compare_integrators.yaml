@@ -1,0 +1,35 @@
+# DSP-chain comparison bench (task S-22): one input, several inverse chains.
+#
+# The point of the exercise is the L2 cross-check of plan 19 §2: the two
+# registered integrators reconstruct the same tone by different routes -- the
+# zero-phase spectral 1/(j omega) and the causal-free cumulative trapezoid with
+# a cubic detrend -- so their in-band disagreement is a *measurement* of the
+# numerical error, not an opinion. Doc 06 (theory) §4 explains why the two
+# differ at the low-frequency edge.
+#
+# Chain 1 is the reference of the diff table and is deliberately the default
+# chain: reading the table top-down then answers "what does leaving the
+# verified path cost?". Every chain that deviates from DspOptions() is marked
+# `experimental` in the output and in the provenance -- its numbers are not the
+# output of the verified twin (coordination decision 2026-07-29, rule 1).
+#
+#   optivibe compare examples/compare_integrators.yaml \
+#       --provenance out/compare.provenance.yaml
+kind: compare
+name: integrators-and-spectra
+
+source:
+  scenario: examples/recover_sine.yaml
+
+chains:
+  - name: default
+    # No dsp block at all == DspOptions() == the verified chain.
+
+  - name: time-integrator
+    dsp:
+      integrator: time
+
+  - name: welch-spectrum
+    dsp:
+      spectrum_method: welch
+      welch_nperseg: 4096

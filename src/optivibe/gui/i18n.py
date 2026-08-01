@@ -1605,6 +1605,221 @@ CATALOG: dict[str, dict[str, str]] = {
         "Press Compute NEA(f) to run the budget.",
         "Нажмите «Вычислить NEA(f)» для бюджета.",
     ),
+    # ------------------------------------------------------------------ #
+    # Experiment panel: the DSP chain (task S-22 W-1)
+    # ------------------------------------------------------------------ #
+    "dsp.exp.tab": _e("DSP experiment", "Эксперимент ЦОС"),
+    "dsp.exp.title": _e("Experiment: DSP chain", "Эксперимент: цепочка ЦОС"),
+    "dsp.exp.reset": _e("Reset to default", "Вернуть дефолт"),
+    "dsp.exp.auto": _e("auto", "авто"),
+    "dsp.exp.band_edge": _e("band edge", "край полосы"),
+    "dsp.exp.row.integrator": _e("Integrator", "Интегратор"),
+    "dsp.exp.row.spectrum": _e("Spectrum", "Спектр"),
+    "dsp.exp.row.window": _e("Window", "Окно"),
+    "dsp.exp.row.nperseg": _e("Welch nperseg", "Welch nperseg"),
+    "dsp.exp.row.noverlap": _e("Welch noverlap", "Welch noverlap"),
+    "dsp.exp.row.f_hp": _e("High-pass f_hp", "Верхняя срезка f_hp"),
+    "dsp.exp.row.f_c": _e("Streaming cut-off f_c", "Потоковая срезка f_c"),
+    "dsp.exp.row.sens": _e("Sensitivity model", "Модель чувствительности"),
+    "dsp.exp.row.sensf": _e("Sensitivity vs f", "Чувствительность по частоте"),
+    "dsp.exp.row.interp": _e("Peak interpolation", "Интерполяция пика"),
+    "dsp.exp.applies.batch": _e("batch", "батч"),
+    "dsp.exp.applies.stream": _e("stream", "поток"),
+    "dsp.exp.applies.both": _e("batch + stream", "батч + поток"),
+    "dsp.exp.verified": _e(
+        "verified: the default chain -- the one the golden set and the V&V plans "
+        "(18/19) cover. Results may be read as the output of the verified twin.",
+        "verified: дефолтная цепочка — та, которую покрывают golden и планы V&V "
+        "(18/19). Результат можно читать как выход верифицированного двойника.",
+    ),
+    "dsp.exp.experimental": _e(
+        "EXPERIMENTAL: {deviations}. Outside the verified chain -- results are not "
+        "covered by the golden set and are exported marked as experimental.",
+        "ЭКСПЕРИМЕНТ: {deviations}. Вне верифицированной цепочки — результат не "
+        "покрыт golden и выгружается с пометкой experimental.",
+    ),
+    "dsp.exp.integrator.help": _e(
+        "How a -> v -> x is integrated. 'frequency': spectral 1/(j omega) with a "
+        "high-pass mask -- zero-phase and exact for stationary in-band content, but "
+        "it needs the whole record, which is why it is batch-only. 'time': "
+        "cumulative trapezoid with a cubic detrend, which also removes a "
+        "non-periodic drift. In band the two agree to a few per cent; the "
+        "disagreement is a measurement of the numerical error, not an opinion "
+        "(L2 cross-check, plan 19 §2). The live stream always uses the causal "
+        "leaky integrator instead (docs/theory/06_dsp_algorithm.md §3.6/§7.6).",
+        "Как интегрируется a -> v -> x. «frequency»: спектральное 1/(j omega) с "
+        "маской ФВЧ — нулевая фаза и точность для стационарного сигнала в полосе, "
+        "но нужна вся запись, поэтому только батч. «time»: кумулятивная трапеция с "
+        "кубическим детрендом, снимает и непериодический дрейф. В полосе методы "
+        "сходятся до единиц процентов; расхождение — измерение численной ошибки, а "
+        "не мнение (кросс-проверка L2, план 19 §2). Живой поток всегда использует "
+        "причинный leaky-интегратор (docs/theory/06_dsp_algorithm.md §3.6/§7.6).",
+    ),
+    "dsp.exp.spectrum.help": _e(
+        "Estimator of the representative spectrum and of the dominant-line search: "
+        "a single rFFT amplitude spectrum ('fft', same units as the signal) or a "
+        "Welch PSD ('welch', units^2/Hz -- averaged segments, lower variance, "
+        "coarser resolution). Batch-only: both are defined over a record. The live "
+        "stream keeps a running windowed periodogram instead "
+        "(docs/theory/06_dsp_algorithm.md §7.6).",
+        "Оценка репрезентативного спектра и поиска доминант: одиночный амплитудный "
+        "спектр rFFT («fft», единицы сигнала) или PSD по Уэлчу («welch», "
+        "единицы^2/Гц — усреднение сегментов, меньше дисперсия, грубее разрешение). "
+        "Только батч: обе определены на записи. Живой поток вместо этого ведёт "
+        "текущую оконную периодограмму (docs/theory/06_dsp_algorithm.md §7.6).",
+    ),
+    "dsp.exp.window.help": _e(
+        "Window applied by the Welch estimators (batch PSD and the running "
+        "streaming spectrum). It trades leakage against resolution: 'hann' is the "
+        "everyday default, 'flattop' measures amplitude accurately at the cost of a "
+        "wide main lobe, 'boxcar' is no window at all. Note the asymmetry of the "
+        "current chain: the window reaches the PSD (and through it the band RMS and "
+        "the ISO grade) but not the 'fft' amplitude spectrum, which is computed "
+        "unwindowed (backlog M-21).",
+        "Окно, применяемое оценками Уэлча (батчевый PSD и текущий потоковый спектр). "
+        "Обмен утечки на разрешение: «hann» — повседневный дефолт, «flattop» точно "
+        "измеряет амплитуду ценой широкого главного лепестка, «boxcar» — без окна. "
+        "Обратите внимание на асимметрию текущей цепочки: окно доходит до PSD (а "
+        "через него до полосного СКЗ и оценки ISO), но не до амплитудного спектра "
+        "«fft», который считается без окна (бэклог M-21).",
+    ),
+    "dsp.exp.nperseg.help": _e(
+        "Welch segment length in samples ('auto' lets the estimator choose from the "
+        "record length). Longer segments resolve closely spaced lines; shorter ones "
+        "average more segments and calm the noise floor. Batch-only: the streaming "
+        "spectrum takes its segment length from the live-mode settings.",
+        "Длина сегмента Уэлча в отсчётах («авто» — оценка выбирает по длине записи). "
+        "Длиннее сегмент — лучше разрешаются близкие линии; короче — больше сегментов "
+        "усредняется и спокойнее шумовой пол. Только батч: потоковый спектр берёт "
+        "длину сегмента из настроек живого режима.",
+    ),
+    "dsp.exp.noverlap.help": _e(
+        "Welch segment overlap in samples ('auto' = nperseg // 2, the usual 50 %). "
+        "Overlap recovers the signal the window taper suppresses at the segment "
+        "edges. Batch-only.",
+        "Перекрытие сегментов Уэлча в отсчётах («авто» = nperseg // 2, обычные 50 %). "
+        "Перекрытие возвращает сигнал, подавленный спадом окна на краях сегмента. "
+        "Только батч.",
+    ),
+    "dsp.exp.f_hp.help": _e(
+        "High-pass cut-off of the integrators, Hz ('band edge' = the variant's lower "
+        "band limit, doc 08). Double integration multiplies by 1/omega^2, so any "
+        "sub-band offset or drift would grow into a ramp and a parabola; this cut-off "
+        "removes it. Raising it well into the band suppresses real signal too.",
+        "Срезка ФВЧ интеграторов, Гц («край полосы» — нижняя граница полосы варианта, "
+        "док 08). Двойное интегрирование умножает на 1/omega^2, поэтому любое смещение "
+        "или дрейф ниже полосы выросли бы в наклон и параболу; срезка их убирает. "
+        "Подъём глубоко в полосу подавит и настоящий сигнал.",
+    ),
+    "dsp.exp.f_c.help": _e(
+        "Causal cut-off of the real-time chain, Hz ('band edge' falls back to f_hp). "
+        "Deliberately independent of the batch f_hp: the causal high-pass and the "
+        "zero-phase batch mask behave differently at the low edge, so this knob tunes "
+        "the streaming-vs-batch agreement without touching the batch path (doc 06 "
+        "§9.3-2). Unused by the batch chain.",
+        "Причинная срезка тракта реального времени, Гц («край полосы» — откат к f_hp). "
+        "Намеренно независима от батчевой f_hp: причинный ФВЧ и батчевая маска с "
+        "нулевой фазой ведут себя по-разному на нижнем крае, поэтому эта ручка "
+        "настраивает согласие поток↔батч, не трогая батчевый путь (док 06 §9.3-2). "
+        "Батчевой цепочкой не используется.",
+    ),
+    "dsp.exp.sens.help": _e(
+        "How the through sensitivity s_target is bound to the operating point "
+        "(SW-33 axis B): 'static' is the scalar at the nominal bias (the v1 default), "
+        "'operating_point' recomputes it at the SNR-optimum bias (the 0.37 rule), "
+        "'nonlinear_curve' inverts eta(dx) point by point for the >50 g study. On a "
+        "recorded input the calibration declared in its analyze spec wins -- a bench "
+        "record must not be rendered with a model scalar (17 §7).",
+        "Как сквозная чувствительность s_target привязана к рабочей точке (SW-33, ось "
+        "B): «static» — скаляр в номинальном bias (дефолт v1), «operating_point» — "
+        "пересчёт в bias максимума ОСШ (правило 0.37), «nonlinear_curve» — поточечная "
+        "инверсия eta(dx) для исследования >50 g. На записи побеждает калибровка, "
+        "заявленная в её спеке анализа: стендовую запись нельзя рисовать модельным "
+        "скаляром (17 §7).",
+    ),
+    "dsp.exp.interp.help": _e(
+        "Refine each dominant line by a quadratic fit over its three highest bins. "
+        "A tone rarely falls on a bin centre, so without the fit the reported "
+        "frequency carries an error of up to half a bin (fs/2N); with it the error "
+        "drops by orders of magnitude on a clean peak. Switch it off to see the bin "
+        "grid the estimator actually works on -- the reported dominants then jump in "
+        "steps of one bin.",
+        "Уточнение каждой доминанты квадратичной параболой по трём старшим бинам. "
+        "Тон редко попадает точно в центр бина, поэтому без уточнения частота "
+        "сообщается с ошибкой до половины бина (fs/2N); с ним на чистом пике ошибка "
+        "падает на порядки. Выключите, чтобы увидеть сетку бинов, на которой реально "
+        "работает оценка: доминанты начнут прыгать шагом в один бин.",
+    ),
+    "dsp.exp.sensf.help": _e(
+        "Frequency treatment of the sensitivity (SW-33 axis C): 'plateau' uses the "
+        "quasi-static scalar (flat well below f1), 'dynamic' divides out the "
+        "single-mode dynamic factor D(f) and so approaches the resonance. Batch-only: "
+        "the correction is a spectral operation over the whole record.",
+        "Частотная трактовка чувствительности (SW-33, ось C): «plateau» — "
+        "квазистатический скаляр (плоский много ниже f1), «dynamic» — деление на "
+        "одномодовый динамический множитель D(f), что позволяет подойти к резонансу. "
+        "Только батч: коррекция — спектральная операция над всей записью.",
+    ),
+    # ------------------------------------------------------------------ #
+    # Compare tab: two DSP chains over one input (task S-22 W-2)
+    # ------------------------------------------------------------------ #
+    "compare.tab": _e("Compare", "Сравнение"),
+    "compare.title": _e("Compare DSP chains", "Сравнение цепочек ЦОС"),
+    "compare.run": _e("Compare chains", "Сравнить цепочки"),
+    "compare.metric": _e("metric", "метрика"),
+    "compare.unit": _e("unit", "ед."),
+    "compare.accel": _e("Recovered acceleration", "Восстановленное ускорение"),
+    "compare.spectrum": _e("Recovered spectrum", "Восстановленный спектр"),
+    "compare.chain_b": _e(
+        "Chain B (chain A is the one on the DSP experiment tab)",
+        "Цепочка B (цепочка A — та, что на вкладке «Эксперимент ЦОС»)",
+    ),
+    "compare.tab.help": _e(
+        "Two inverse chains over one and the same input: the overlay shows what "
+        "changes in the traces, the table shows what changes in the metrics of "
+        "17 §1. Chain A is the chain edited on the DSP experiment tab, chain B is "
+        "the variation on the left. The input is either the scenario assembled in "
+        "the panel or a recorded capture described by an analyze spec -- opened "
+        "the same way the live mode and 'optivibe analyze' open theirs, so a "
+        "difference in the numbers can only come from the chains. Chains that "
+        "deviate from the default are marked experimental: their numbers are not "
+        "covered by the golden set.",
+        "Две обратные цепочки на одном и том же входе: наложение показывает, что "
+        "меняется в рядах, таблица — что меняется в метриках 17 §1. Цепочка A — "
+        "та, что правится на вкладке «Эксперимент ЦОС», цепочка B — вариация "
+        "слева. Вход — либо сценарий, собранный в панели, либо запись, описанная "
+        "спекой анализа; открывается так же, как в живом режиме и в «optivibe "
+        "analyze», поэтому расхождение чисел может прийти только от цепочек. "
+        "Цепочки, отклонившиеся от дефолта, помечаются experimental: их числа не "
+        "покрыты golden.",
+    ),
+    "compare.idle": _e(
+        "Idle. Pick the input, set chain B on the left and press Compare chains.",
+        "Ожидание. Выберите вход, задайте цепочку B слева и нажмите «Сравнить цепочки».",
+    ),
+    "compare.running": _e("Comparing chains...", "Сравнение цепочек..."),
+    "compare.failed": _e("Comparison failed: {message}", "Сравнение не выполнено: {message}"),
+    "compare.done": _e(
+        "Input: {input} | comparison: {status}",
+        "Вход: {input} | сравнение: {status}",
+    ),
+    "compare.chain_verdict": _e(
+        "{name} [{status}]: {deviations}",
+        "{name} [{status}]: {deviations}",
+    ),
+    "compare.no_deviation": _e("default chain", "дефолтная цепочка"),
+    "compare.rel_to": _e("rel. to {name}", "отн. {name}"),
+    "compare.chain_a_name": _e("chain A", "цепочка A"),
+    "compare.chain_b_name": _e("chain B", "цепочка B"),
+    "compare.gui_name": _e("GUI comparison", "сравнение из GUI"),
+    "status.compare_done": _e(
+        "Comparison done: {n} chains, {status}.",
+        "Сравнение выполнено: цепочек {n}, {status}.",
+    ),
+    "compare.export": _e(
+        "Comparison exported: {n} file(s) to {directory}",
+        "Сравнение выгружено: файлов {n} в {directory}",
+    ),
     # Reference notes (HTML). English kept byte-identical to the module block.
     "physics.notes.html": _e(
         _PHYSICS_NOTES_EN,

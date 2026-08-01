@@ -903,10 +903,13 @@ class DspOptions(_Frozen):
 
     Attributes
     ----------
-    integrator : {"frequency", "time"}
+    integrator : {"frequency", "time", "leaky"}
         Kinematic integrator method ``a -> v -> x`` (registry key, S5 §2).
         ``"frequency"`` is spectral ``1/(j omega)`` with a high-pass mask;
-        ``"time"`` is cumulative-trapezoid with a Butterworth detrend.
+        ``"time"`` is cumulative-trapezoid with a Butterworth detrend;
+        ``"leaky"`` is the causal scheme of the streaming layer applied to a
+        whole record (comparison bench, task S-22 W-3) -- an added alternative,
+        not a change of the default.
     spectrum_method : {"fft", "welch"}
         Spectral estimator for the representative spectrum and dominant-peak
         search (S5 §3): single rFFT amplitude or a Welch PSD.
@@ -948,12 +951,16 @@ class DspOptions(_Frozen):
         Whether to divide out ``|H_lat(f)|`` to approach ``f1`` (S5 §1); the
         default ``False`` uses the flat plateau scalar (the off-resonance mode).
         ``sensitivity_freq="dynamic"`` enables the same correction.
+    peak_interpolation : bool
+        Refine dominant lines by quadratic sub-bin interpolation (the default
+        ``True`` is the v1 behaviour). Switching it off reports the bare bin
+        centre -- the teaching alternative of task S-22 W-3.
     iso_machine_class : str
         ISO 10816-3 machine class for the severity assessment (key into
         ``optivibe.dsp.iso.ISO_10816_3_ZONES``; default ``"group2_rigid"``).
     """
 
-    integrator: Literal["frequency", "time"] = "frequency"
+    integrator: Literal["frequency", "time", "leaky"] = "frequency"
     spectrum_method: Literal["fft", "welch"] = "fft"
     window: str = "hann"
     f_hp_hz: float | None = Field(default=None, gt=0.0, description="HP cut-off, Hz (band if None)")
@@ -968,6 +975,7 @@ class DspOptions(_Frozen):
     sensitivity_model: Literal["static", "operating_point", "nonlinear_curve"] = "static"
     sensitivity_freq: Literal["plateau", "dynamic"] = "plateau"
     deconvolve_hlat: bool = False
+    peak_interpolation: bool = True
     iso_machine_class: str = "group2_rigid"
 
 

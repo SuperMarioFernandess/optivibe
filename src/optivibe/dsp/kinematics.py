@@ -13,6 +13,16 @@ are registered (selected by ``DspOptions.integrator``):
     and phase-correct: for a tone well inside the band ``x = -a/omega^2`` lags
     ``a`` by ``pi`` (the golden phase check).
 
+``"leaky"``
+    The **causal** scheme of the real-time layer, run over a whole record:
+    two chained :class:`~optivibe.dsp.streaming.LeakyIntegrator` stages at
+    ``f_hp``. Registered as a batch alternative for the comparison bench (task
+    S-22 W-3): it is the same filter the live oscilloscope uses, so putting it
+    next to the two batch routes on one input shows -- rather than asserts --
+    what causality costs (a first-order phase lag and a low-frequency roll-off
+    the zero-phase routes do not have; theory-06 §3.6/§7.6). Nothing in the
+    verified default path selects it.
+
 ``"time"``
     Cumulative-trapezoid integration followed by a polynomial detrend (the
     ``"детренд"`` option) to remove the integration drift -- the DC offset that
@@ -42,6 +52,7 @@ __all__ = [
     "INTEGRATOR_REGISTRY",
     "highpass_mask",
     "integrate_frequency",
+    "integrate_leaky",
     "integrate_time",
 ]
 
@@ -211,6 +222,44 @@ def integrate_time(accel: FloatArray, fs: float, f_hp: float) -> tuple[FloatArra
         np.ascontiguousarray(displacement, dtype=np.float64), _DETREND_ORDER
     )
     displacement = _safe_highpass(displacement, fs, f_hp)
+    return (
+        np.ascontiguousarray(velocity, dtype=np.float64),
+        np.ascontiguousarray(displacement, dtype=np.float64),
+    )
+
+
+@INTEGRATOR_REGISTRY.register("leaky")
+def integrate_leaky(accel: FloatArray, fs: float, f_hp: float) -> tuple[FloatArray, FloatArray]:
+    """Causal leaky integration ``a -> v -> x`` over a whole record (S-22 W-3).
+
+    Two chained :class:`~optivibe.dsp.streaming.LeakyIntegrator` stages at the
+    high-pass cut-off: the *same* filter the streaming layer runs frame by frame
+    (theory-06 §3.6), applied here in one call. It exists so the bench can put a
+    causal route next to the two zero-phase batch routes on one input; it is not
+    part of the verified default chain, and it does **not** replace the streaming
+    path (which keeps its own stateful instances).
+
+    Parameters
+    ----------
+    accel : numpy.ndarray
+        Acceleration time series, m/s^2.
+    fs : float
+        Sampling frequency, Hz.
+    f_hp : float
+        Leak / high-pass cut-off, Hz.
+
+    Returns
+    -------
+    velocity : numpy.ndarray
+        Velocity, m/s (lags the zero-phase routes by the causal filter phase).
+    displacement : numpy.ndarray
+        Displacement, m.
+    """
+    from optivibe.dsp.streaming import LeakyIntegrator
+
+    signal = np.ascontiguousarray(accel, dtype=np.float64)
+    velocity = LeakyIntegrator(fs, f_hp).process(signal)
+    displacement = LeakyIntegrator(fs, f_hp).process(velocity)
     return (
         np.ascontiguousarray(velocity, dtype=np.float64),
         np.ascontiguousarray(displacement, dtype=np.float64),

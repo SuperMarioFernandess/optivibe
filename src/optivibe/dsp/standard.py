@@ -123,7 +123,7 @@ class StandardDsp:
             )
         else:
             spectrum = amplitude_spectrum(accel, fs)
-        dominant = dominant_frequencies(spectrum)
+        dominant = dominant_frequencies(spectrum, interpolate=options.peak_interpolation)
 
         # 4. Metrics: RMS, cross-axis residual, ISO severity.
         rms_metrics = {"a": rms(accel), "v": rms(velocity), "x": rms(displacement)}
