@@ -93,7 +93,7 @@ export function section() {
   ]));
 
   K.push(H(2,"7.4 Генератор возбуждения (пример: sine)","s_impl_exc"));
-  K.push(para([flink("src/optivibe/excitation/generators.py","excitation/generators.py"), R(" — генераторы за протоколом "), c("ExcitationSource.generate"), R(":")]));
+  K.push(para([R("Генераторы живут по файлу на семейство ("), flink("src/optivibe/excitation/tonal.py","excitation/tonal.py"), R(", "), c("sweep.py"), R(", "), c("random_noise.py"), R(", "), c("shock.py"), R(", "), c("from_file.py"), R(", "), c("composite.py"), R("), все — за одним протоколом "), c("ExcitationSource.generate"), R(":")]));
   K.push(...code([
     "from optivibe.core.units import G0  # 9.80665 м/с²",
     "",
@@ -109,7 +109,8 @@ export function section() {
     "        ax, ay, az = axes[spec.axis]",
     "        return Excitation(ax, ay, az, fs=spec.fs_hz, seed=seed)",
   ]));
-  K.push(links([ xr("Алгоритм возбуждения → §6.1","s_algo_exc"), sep(), flink("src/optivibe/excitation/") ]));
+  K.push(para([R("Модуляция несущей — опциональное поле "), c("SineSpec.modulation"), R(" (§7.13); при её отсутствии выражение выше исполняется дословно, поэтому прежние сценарии дают побайтово тот же массив.")]));
+  K.push(links([ xr("Алгоритм возбуждения → §6.1","s_algo_exc"), sep(), xr("Композит и модуляция → §7.13","s_impl_composite"), sep(), flink("src/optivibe/excitation/") ]));
 
   K.push(H(2,"7.5 Механика: f₁, H_lat(f), частотный решатель","s_impl_mech"));
   K.push(para([flink("src/optivibe/mechanics/cantilever.py","mechanics/cantilever.py"), R(" — производные величины и частотный решатель (документ 02/05):")]));
@@ -290,6 +291,136 @@ export function section() {
     "        self._thread.start()              # окно остаётся отзывчивым",
   ]));
   K.push(links([ xr("GUI и потоки → §3.1","s_ui_threads"), sep(), flink("src/optivibe/gui/controllers/job_controller.py"), sep(), flink("src/optivibe/gui/workers/job_worker.py") ]));
+
+  K.push(H(2,"7.11 Потоковый слой: причинный интегратор и бегущий спектр","s_impl_stream"));
+  K.push(para([flink("src/optivibe/dsp/streaming.py","dsp/streaming.py"), R(" — реализация §6.5-бис. Три класса плюс драйвер реплея; батчевый путь не тронут, модуль строго аддитивен:")]));
+  K.push(...code([
+    "class LeakyIntegrator:                     # H(z) = (dt/2)(1+z⁻¹)/(1−α z⁻¹), α = e^{−2π f_c/fs}",
+    "    def __init__(self, fs: float, f_c: float) -> None: ...",
+    "    def process(self, block: FloatArray) -> FloatArray:  # состояние zi живёт между кадрами",
+    "    def reset(self) -> None: ...",
+    "",
+    "class StreamingSpectrum:                   # кольцевой буфер + S[m] = β S[m−1] + (1−β)|X|²",
+    "    def process(self, block: FloatArray) -> None: ...",
+    "    def spectrum(self) -> Spectrum | None:  # None, пока не набран первый сегмент",
+    "    @property",
+    "    def ready(self) -> bool: ...",
+    "",
+    "class StreamingDsp:",
+    "    def __init__(self, template: DetectorOutput, variant: VariantConfig,",
+    "                 options: DspOptions, *, constants=None, sensitivity_model=None,",
+    "                 nperseg: int = 1024, noverlap=None, avg_segments: int = 8,",
+    "                 keep_history: bool = True, history_samples: int | None = None) -> None: ...",
+    "    def process(self, sample_block: FloatArray) -> None: ...",
+    "    def snapshot(self) -> VibrationResult:   # кадр: следы a/v/x, спектры, метрики, NEA",
+    "    def note_dropped(self, count: int) -> None:",
+    "    @property",
+    "    def warmed(self) -> bool: ...            # осели ли причинные фильтры",
+    "    @property",
+    "    def dropped_samples(self) -> int: ...",
+    "",
+    "def replay_record(detector: DetectorOutput, variant: VariantConfig, options: DspOptions,",
+    "                  *, block_size: int, ...) -> VibrationResult:   # драйвер приёмки",
+  ]));
+  K.push(para([R("Два параметра стоит понимать вместе. "), c("keep_history=True"), R(" держит полную запись (реплей и приёмка), "), c("keep_history=False"), R(" — ограниченный «осциллографный» буфер; "), c("history_samples"), R(" (keyword-only, только для ограниченного режима) задаёт окно "), R("отображаемого следа", { bold: true }), R(". Значение "), c("None"), R(" воспроизводит прежнее окно бит-в-бит — это закреплено тестом, а не декларацией; двигается "), R("только след", { bold: true }), R(", спектры, бегущие метрики и состояния интеграторов остаются побайтово теми же, а память ограничена предвыделенным кольцевым буфером, а не растущим списком.")]));
+  K.push(para([R("Приёмочный якорь: "), c("replay_record"), R(" — это тот же цикл "), c("process()"), R("/"), c("snapshot()"), R(", поэтому golden эквивалентности поток↔батч покрывает и математику живого пути; отдельным тестом закреплено, что финальный кадр живого цикла побайтово равен "), c("replay_record"), R(" на той же записи.")]));
+  K.push(links([ xr("Алгоритм → §6.5-бис","s_algo_stream"), sep(), xr("Живой режим → §3.6","s_live"), sep(), flink("src/optivibe/dsp/streaming.py") ]));
+
+  K.push(H(2,"7.12 Ожидаемые пики: одна точка входа, реестр предикторов","s_impl_peaks"));
+  K.push(para([flink("src/optivibe/analysis/expected_peaks.py","analysis/expected_peaks.py"), R(" — реализация §6.8. Место модуля выбрано по прецеденту бюджета NEA: это композиция нескольких доменов, а не стадия конвейера.")]));
+  K.push(...code([
+    "def predict_expected_peaks(scenario: ScenarioConfig, variant: VariantConfig,",
+    "                           constants: Constants | None = None, *,",
+    "                           kinds: Sequence[PeakKind] | None = None,",
+    "                           max_harmonic: int = 3,",
+    "                           sigma_factor: float = DEFAULT_SIGMA_FACTOR) -> ExpectedPeaks:",
+    '    """Только конфигурация: временной ряд сюда физически не может попасть."""',
+    "",
+    "PEAK_KINDS = ('mode','harmonic','intermod','sideband','mains','alias','f_mount')",
+    "PEAK_PREDICTOR_REGISTRY: Registry[tuple[ExpectedPeak, ...]]  # ветвь = регистрация",
+    "",
+    "@dataclass(frozen=True)",
+    "class ExpectedPeak:",
+    "    freq_hz: float; kind: PeakKind; label: str; explanation: str",
+    "    amplitude_m_s2: float | None      # None там, где высота НЕ свойство конфигурации",
+    "    threshold_m_s2: float | None; width_hz: float | None",
+    "    order: int; source_freq_hz: float | None",
+    "    @property",
+    "    def significant(self) -> bool | None:   # None = сравнение не определено",
+    "",
+    "def amplitude_noise_threshold(...) -> float:   # k·√(2·Δf)·NEA(f)",
+  ]));
+  K.push(para([R("Контейнер "), c("ExpectedPeaks"), R(" несёт провенанс самого предсказания — f₁, эффективную Q, разрешение Δf, Найквиста, полку NEA, запрошенные ветви и полосу f₁/Q, — чтобы по списку линий можно было восстановить, из чего он получен. Инвариант «расчёт вне UI-потока» здесь держится "), R("структурно, а не по договорённости", { bold: true }), R(": функция принимает только сценарий и вариант и не способна получить временной ряд; добавление параметра «в форме записи» тихо аннулировало бы гарантию, о чём сказано прямо в докстрингах обеих точек вызова.")]));
+  K.push(links([ xr("Алгоритм → §6.8","s_algo_peaks"), sep(), flink("src/optivibe/analysis/expected_peaks.py"), sep(), flink("src/optivibe/viz/dsp.py") ]));
+
+  K.push(H(2,"7.13 Композит и модуляция возбуждения","s_impl_composite"));
+  K.push(para([flink("src/optivibe/excitation/composite.py","excitation/composite.py"), R(" — источник, у которого "), R("нет своей физики сигнала", { bold: true }), R(": он вызывает те же зарегистрированные генераторы и складывает результаты поосевно.")]));
+  K.push(...code([
+    "def component_seed(scenario_seed: int | None, index: int) -> int | None:",
+    '    """0 → сид сценария без изменений; i≥1 → SeedSequence([seed, TAG, i])."""',
+    "",
+    "class CompositeExcitationSource:",
+    "    def generate(self, spec: ExcitationSpec, *, seed: int | None = None) -> Excitation:",
+    "        # meta: суммарные rms/peak и покомпонентные rms — для предупреждения о FS",
+  ]));
+  K.push(para([R("Модуляция живёт в моделях конфигурации и в тональном генераторе: "), c("AmModulation"), R("/"), c("FmModulation"), R(" за союзом "), c("Modulation"), R(", опциональные "), c("SineSpec.modulation"), R(" и "), c("SineSpec.phase_rad"), R(", опциональный "), c("RandomSpec.seed"), R(". Все поля строго опт-ин: "), c("m = 0"), R(", "), c("β_FM = 0"), R(" и композит из одной компоненты дают "), R("побайтово тот же массив", { bold: true }), R(", что до-S-21 путь.")]));
+  K.push(links([ xr("Алгоритм → §6.1","s_algo_composite"), sep(), flink("src/optivibe/excitation/composite.py"), sep(), flink("src/optivibe/excitation/tonal.py") ]));
+
+  K.push(H(2,"7.14 Ввод измеренных параметров","s_impl_ingest"));
+  K.push(para([flink("src/optivibe/io/characterization.py","io/characterization.py"), R(" — контракт измерения и ридеры по видам; "), flink("src/optivibe/io/ingest.py","io/ingest.py"), R(" — путь «измерение → конфиг» (§3.5).")]));
+  K.push(...code([
+    "# characterization.py",
+    "class MeasuredParameter(BaseModel):   # frozen",
+    "    name: str; value: float; u: float | None; method: str   # значение в СИ",
+    "class Provenance(BaseModel):          # frozen",
+    "    kind: str; sidecar: Path; data_file: Path | None; sha256: str",
+    "    instrument: str; timestamp: str",
+    "CHARACTERIZATION_REGISTRY: Registry[CharacterizationReader]",
+    "    #  scalar · spectrum · rin_psd · ringdown · profile",
+    "def load_characterization(sidecar_path: Path | str) -> CharacterizationResult: ...",
+    "def resolve_sidecar_path(path: Path | str) -> Path:   # CSV ↔ YAML по общему stem",
+    "",
+    "# ingest.py",
+    "PARAMETER_TARGETS: dict[str, tuple[str, str]]   # имя параметра → (блок, поле)",
+    "def apply_measurements(system: SystemConfig,",
+    "                       results: Sequence[CharacterizationResult], *,",
+    "                       constants: Constants | None = None) -> IngestReport: ...",
+    "def save_provenance(report: IngestReport, composition_path: Path) -> Path: ...",
+  ]));
+  K.push(para([R("Дисциплина, закодированная в "), c("apply_measurements"), R(", а не оставленная на оператора: правило GUM (без "), c("u"), R(" параметр в конфиг не пишется), анти-даблкаунт (измеренное "), R("замещает", { bold: true }), R(" модельное), семантика override для вычислимых полей, отсутствие конфиг-слота у "), c("f1_hz"), R(" и "), c("dop"), R(", конфликт при двух измерениях одного поля. Ключ "), c("PARAMETER_TARGETS"), R(" совпадает с именем конфиг-поля один в один — слоя переименований, который мог бы разъехаться, нет.")]));
+  K.push(links([ xr("Продуктовое описание → §3.5","s_ingest"), sep(), flink("src/optivibe/io/characterization.py"), sep(), flink("src/optivibe/io/ingest.py") ]));
+
+  K.push(H(2,"7.15 Стенд сравнения и потоковые воркеры","s_impl_compare"));
+  K.push(para([flink("src/optivibe/analysis/compare.py","analysis/compare.py"), R(" — Qt-free ядро §3.7. Вердикт "), R("вычисляется", { bold: true }), R(", а карта применимости объявляется на "), R("все", { bold: true }), R(" поля модели (полнота закреплена тестом: новое поле не может появиться без тега):")]));
+  K.push(...code([
+    "DEFAULT_CHAIN = DspOptions()                  # верифицированная цепочка — только она",
+    "ChainStatus = Literal['verified', 'experimental']",
+    "CHAIN_APPLICABILITY: dict[str, Literal['batch','stream','both']]",
+    "EXPERIMENT_FIELDS: tuple[str, ...]            # порядок строк панели",
+    "",
+    "def chain_status(options: DspOptions) -> ChainStatus: ...",
+    "def chain_deltas(options: DspOptions) -> tuple[ChainDelta, ...]:   # что именно отклонилось",
+    "def compare_chains(source: CompareInput, chains: Sequence[ChainSpec], *,",
+    "                   name: str = 'comparison', constants=None) -> ComparisonResult:",
+    "    # каждая цепочка исполняется НЕИЗМЕНЁННЫМ StandardDsp (17 §7)",
+    "def input_from_scenario(...) -> CompareInput      # тот же шов, что у ScenarioSource",
+    "def input_from_analyze_spec(...) -> CompareInput  # тот же шов, что у analyze_record",
+    "def chain_provenance(...) / provenance_yaml(...)  # вердикт + дифф + версия/HEAD",
+  ]));
+  K.push(para([flink("src/optivibe/gui/workers/stream.py","gui/workers/stream.py"), R(" — источники и цикл живого режима, "), R("Qt-free", { bold: true }), R(" (проверено импортом в окружении без PySide6), поэтому при появлении второго потребителя переносится в ядро одним движением:")]));
+  K.push(...code([
+    "class StreamSource(Protocol): ...          # ScenarioSource | RecordSource",
+    "@dataclass(frozen=True)",
+    "class StreamFrame:",
+    "    result: VibrationResult; warmed: bool",
+    "    dropped_samples: int | None            # None в ускоренном режиме — НЕ 0",
+    "    n_samples: int; elapsed_s: float; loops: int; seam: bool; paced: bool",
+    "    source_label: str",
+    "def default_block_size(fs: float, rate_hz: float) -> int: ...",
+    "def run_stream(...)                        # часы и sleep инжектируются → тестируемо",
+  ]));
+  K.push(para([R("Виджеты — тонкие: "), flink("src/optivibe/gui/widgets/live_controls.py","gui/widgets/live_controls.py"), R(" (управление и строка провенанса; отдельный виджет "), R("нарочно", { italics: true }), R(" — это точка расширения, а не монолит внутри вида), "), flink("src/optivibe/gui/widgets/dsp_controls.py","gui/widgets/dsp_controls.py"), R(" (панель эксперимента — "), R("вид", { italics: true }), R(" на "), c("DspOptions"), R(": эмитит полезную нагрузку, ничего не запускает и не хранит своей истины), "), flink("src/optivibe/gui/widgets/compare_panel.py","gui/widgets/compare_panel.py"), R(" (вкладка сравнения). Расчёт сравнения идёт "), c("CompareJob"), R("'ом в существующем семействе воркеров, то есть вне UI-потока.")]));
+  K.push(links([ xr("Продуктовое описание → §3.7","s_cmp"), sep(), xr("Живой режим → §3.6","s_live"), sep(), flink("src/optivibe/analysis/compare.py"), sep(), flink("src/optivibe/gui/workers/stream.py") ]));
 
 
   return K;

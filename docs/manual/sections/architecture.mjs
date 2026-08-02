@@ -33,8 +33,14 @@ export function section() {
     "  analysis/          # truth-vs-recovery, NEA-бюджет, развёртки, Монте-Карло (S6)",
     "  viz/               # ЧИСТЫЕ фигуры matplotlib/plotly (без Qt)",
     "  io/loaders.py      # CSV/WAV/TDMS/UFF/MAT/HDF5 → Excitation (S1/S8)",
-    "  cli/               # optivibe run/report/sweep",
+    "  io/records.py      # записи фототока → analyze (S-02)",
+    "  io/{characterization,ingest}.py  # измеренные параметры + провенанс (S-13)",
+    "  dsp/streaming.py   # причинный потоковый слой реального времени (S-03)",
+    "  analysis/{expected_peaks,compare}.py  # ожидаемые пики (S-16/17), стенд ЦОС (S-22)",
+    "  excitation/composite.py  # композит и АМ/ЧМ-модуляция (S-21)",
+    "  cli/               # optivibe run/report/sweep/analyze/compare/ingest",
     "  gui/               # десктоп-приложение PySide6/PyQtGraph (S7)",
+    "  gui/workers/stream.py    # Qt-free источники и цикл живого режима (O-SW-03)",
     "configs/{constants.yaml, variants/*, scenarios/*}   # зеркала 01/08",
     "examples/  tests/  docs/  packaging/                # сценарии, тесты, доки, сборка",
   ]));
@@ -61,20 +67,25 @@ export function section() {
   K.push(tbl(
     ["Реестр","Зарегистрированные ключи","Умолчание"],
     [
-      ["EXCITATION_REGISTRY","sine, multitone, sweep, random, shock, csv, wav, tdms, uff, mat, hdf5","sine"],
+      ["EXCITATION_REGISTRY","sine, multitone, sweep, random, shock, composite, csv, wav, tdms, uff, mat, hdf5","sine"],
       ["MECHANICS_REGISTRY","modal, modal_time, stub","modal"],
-      ["OPTICS_REGISTRY","cylinder, stub","cylinder"],
+      ["OPTICS_REGISTRY","cylinder, reflector, stub","cylinder"],
+      ["REFLECTOR_MODEL_REGISTRY","cylinder, sphere, plane, wedge (за ключом reflector; §4.7)","cylinder"],
       ["DETECTOR_REGISTRY","stub, photodiode","stub"],
       ["DSP_REGISTRY","stub, standard","stub"],
-      ["INTEGRATOR_REGISTRY","frequency, time","frequency"],
+      ["INTEGRATOR_REGISTRY","frequency, time, leaky","frequency"],
       ["SENSITIVITY_REGISTRY","static, operating_point, nonlinear_curve","static"],
-      ["LOADER_REGISTRY","csv, wav, tdms, uff, mat, hdf5","—"],
+      ["LOADER_REGISTRY","csv, wav, tdms, uff, mat, hdf5 (replay-вход)","—"],
+      ["RECORD_REGISTRY","csv, tdms, hdf5 (записи фототока для analyze)","—"],
+      ["CHARACTERIZATION_REGISTRY","scalar, spectrum, rin_psd, ringdown, profile (§3.5)","—"],
+      ["PEAK_PREDICTOR_REGISTRY","mode, harmonic, intermod, sideband (§6.8); mains, alias, f_mount объявлены и пусты","—"],
     ],
     [2650,5210,1500]
   ));
+  K.push(para([R("Реестров стало больше не случайно: каждый новый слой — ввод измерений, ожидаемые пики, альтернативы цепочки ЦОС — добавлялся "), R("регистрацией", { bold: true }), R(", а не правкой ядра. Именно поэтому контракты стадий и эталон вариантов A/B/C/D не менялись ни в одной из последних шести волн.")]));
 
   K.push(H(2,"5.5 Конфигурация и сценарии","s_arch_config"));
-  K.push(para([R("Три уровня YAML: "), c("configs/constants.yaml"), R(" (физконстанты, зеркало документа 01), "), c("configs/variants/{A,B,C,D}.yaml"), R(" (параметры вариантов, зеркало 08; включают блоки optics и detector), и сценарий прогона. Сценарий задаёт "), c("{variant, excitation, stages, detector, dsp, seed}"), R("; "), c("DspOptions"), R(" включает "), c("integrator"), R(", "), c("spectrum_method"), R(", "), c("calibration∈{ideal,bench}"), R(", "), c("sensitivity_model"), R(", "), c("sensitivity_freq"), R(", "), c("iso_machine_class"), R(" (все с дефолтами = v1). Спецификации аналитики ("), c("SweepSpec"), R("/"), c("MonteCarloSpec"), R(") — отдельные модели в "), flink("src/optivibe/analysis/spec.py","analysis/spec.py"), R(".")]));
+  K.push(para([R("Три уровня YAML: "), c("configs/constants.yaml"), R(" (физконстанты, зеркало документа 01), "), c("configs/variants/{A,B,C,D,proto_poc}.yaml"), R(" (параметры вариантов, зеркало 08; включают блоки optics и detector; "), c("proto_poc"), R(" — конфигурация прототипа с плейсхолдерами до фазы 0), и сценарий прогона. Сценарий задаёт "), c("{variant, excitation, stages, detector, dsp, seed}"), R("; "), c("DspOptions"), R(" включает "), c("integrator"), R(", "), c("spectrum_method"), R(", "), c("window"), R(", "), c("welch_nperseg"), R("/"), c("welch_noverlap"), R(", "), c("f_hp_hz"), R(", "), c("f_c_stream"), R(", "), c("calibration∈{ideal,bench}"), R(", "), c("sensitivity_model"), R(", "), c("sensitivity_freq"), R(", "), c("deconvolve_hlat"), R(", "), c("peak_interpolation"), R(", "), c("iso_machine_class"), R(" (все с дефолтами = v1; отклонение от них помечает прогон экспериментальным — §3.7). Спецификации аналитики ("), c("SweepSpec"), R("/"), c("MonteCarloSpec"), R(") — отдельные модели в "), flink("src/optivibe/analysis/spec.py","analysis/spec.py"), R(".")]));
 
   K.push(H(2,"5.6 Конвейер: forward + inverse","s_arch_pipeline"));
   K.push(para([R("Оркестратор ("), flink("src/optivibe/pipeline/orchestrator.py","pipeline/orchestrator.py"), R(") компонует стадии по контрактам:")]));
