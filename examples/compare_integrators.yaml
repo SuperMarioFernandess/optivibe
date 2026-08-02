@@ -4,7 +4,7 @@
 # registered integrators reconstruct the same tone by different routes -- the
 # zero-phase spectral 1/(j omega) and the causal-free cumulative trapezoid with
 # a cubic detrend -- so their in-band disagreement is a *measurement* of the
-# numerical error, not an opinion. Doc 06 (theory) §4 explains why the two
+# numerical error, not an opinion. theory-06 §4 explains why the two
 # differ at the low-frequency edge.
 #
 # Chain 1 is the reference of the diff table and is deliberately the default

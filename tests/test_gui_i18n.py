@@ -238,3 +238,38 @@ def test_secondary_tabs_translate_on_language_switch(qtbot) -> None:
     set_language("en")
     assert window._sweep._controls.title() == "Sweep"
     assert window._live._cantilever_check.text() == "cantilever"
+
+
+# --------------------------------------------------------------------------- #
+# Citation convention: theory blocks are never cited as a bare "doc NN"
+# --------------------------------------------------------------------------- #
+#: Bare-number citations of the DSP theory block. Number 06 of the knowledge
+#: base is the *physics decision log*, so "doc 06" / "док 06" sends the reader
+#: to the wrong document; the block is ``docs/theory/06_dsp_algorithm.md`` and
+#: is cited as ``theory-06 §X`` or by path (rule of 2026-07-31, doc 13). The
+#: ambiguity already cost one incident (the block overwrote the decision log in
+#: the knowledge base), and in the catalog it reaches the user's screen.
+_AMBIGUOUS_THEORY_CITATIONS = ("doc 06", "док 06", "doc-06", "док-06")
+
+
+def test_catalog_cites_the_dsp_theory_block_unambiguously() -> None:
+    """No catalog string may cite the theory block as a bare ``doc 06``.
+
+    Scans the whole catalog rather than the single string that was wrong, so a
+    new tooltip cannot reintroduce the ambiguity in either locale.
+    """
+    offenders = [
+        (key, lang)
+        for key, entry in CATALOG.items()
+        for lang in LANGUAGES
+        for bad in _AMBIGUOUS_THEORY_CITATIONS
+        if bad in entry[lang].lower()
+    ]
+    assert not offenders, f"cite the block as 'theory-06 §X' or by path: {offenders}"
+
+
+def test_streaming_cutoff_help_points_at_the_theory_block() -> None:
+    """The ``f_c_stream`` help cites ``theory-06 §9.3-2`` in both locales."""
+    entry = CATALOG["dsp.exp.f_c.help"]
+    for lang in LANGUAGES:
+        assert "theory-06 §9.3-2" in entry[lang]

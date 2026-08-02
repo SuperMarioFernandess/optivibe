@@ -923,7 +923,7 @@ class DspOptions(_Frozen):
         Causal streaming high-pass / leak cut-off for the S-03 real-time layer
         (:class:`~optivibe.dsp.streaming.LeakyIntegrator`), Hz; ``None`` falls
         back to ``f_hp`` (the variant band edge). Deliberately **independent** of
-        the batch ``f_hp_hz`` (doc 06 §9.3-2): the causal high-pass and the batch
+        the batch ``f_hp_hz`` (theory-06 §9.3-2): the causal high-pass and the batch
         zero-phase mask behave differently at the low-frequency edge, so a
         separate knob tunes the streaming-vs-batch in-band agreement without
         touching the batch path. Unused by the batch chain.

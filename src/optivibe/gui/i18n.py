@@ -1715,12 +1715,12 @@ CATALOG: dict[str, dict[str, str]] = {
         "Causal cut-off of the real-time chain, Hz ('band edge' falls back to f_hp). "
         "Deliberately independent of the batch f_hp: the causal high-pass and the "
         "zero-phase batch mask behave differently at the low edge, so this knob tunes "
-        "the streaming-vs-batch agreement without touching the batch path (doc 06 "
+        "the streaming-vs-batch agreement without touching the batch path (theory-06 "
         "§9.3-2). Unused by the batch chain.",
         "Причинная срезка тракта реального времени, Гц («край полосы» — откат к f_hp). "
         "Намеренно независима от батчевой f_hp: причинный ФВЧ и батчевая маска с "
         "нулевой фазой ведут себя по-разному на нижнем крае, поэтому эта ручка "
-        "настраивает согласие поток↔батч, не трогая батчевый путь (док 06 §9.3-2). "
+        "настраивает согласие поток↔батч, не трогая батчевый путь (theory-06 §9.3-2). "
         "Батчевой цепочкой не используется.",
     ),
     "dsp.exp.sens.help": _e(

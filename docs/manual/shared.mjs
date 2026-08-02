@@ -154,12 +154,19 @@ export function buildDocument(children) {
           run: { color: "0563C1", underline: { type: UnderlineType.SINGLE, color: "0563C1" } } },
       ],
     },
+    // Каждый шаблон «пять блоков» (15 §4) — самостоятельный список, поэтому нумераций
+    // несколько: docx-js заводит по одному конкретному numId на ЗАРЕГИСТРИРОВАННУЮ ссылку,
+    // а незарегистрированная молча схлопывается на соседнюю (тогда второй список в главе
+    // продолжает счёт «6…10» вместо «1…5»). Ссылки n1…n9 объявлены явно ровно поэтому;
+    // модулю секции достаточно передать свою в nums(items, ref).
     numbering: {
       config: [
         { reference: "bul", levels: [{ level: 0, format: LevelFormat.BULLET, text: "•",
           alignment: AlignmentType.LEFT, style: { paragraph: { indent: { left: 560, hanging: 280 } } } }] },
-        { reference: "n1", levels: [{ level: 0, format: LevelFormat.DECIMAL, text: "%1.",
-          alignment: AlignmentType.LEFT, style: { paragraph: { indent: { left: 560, hanging: 280 } } } }] },
+        ...["n1", "n2", "n3", "n4", "n5", "n6", "n7", "n8", "n9"].map((reference) => ({
+          reference, levels: [{ level: 0, format: LevelFormat.DECIMAL, text: "%1.",
+            alignment: AlignmentType.LEFT, style: { paragraph: { indent: { left: 560, hanging: 280 } } } }],
+        })),
       ],
     },
     sections: [{
