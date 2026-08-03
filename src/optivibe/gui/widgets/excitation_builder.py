@@ -10,8 +10,9 @@ validates -- the widget holds no signal logic, only the input fields (09 §9).
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 
 import yaml
 from PySide6.QtWidgets import (
@@ -27,6 +28,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSpinBox,
     QStackedWidget,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -127,11 +129,15 @@ _ABOUT = {
         "§2.1.4). Each component keeps the level it declares -- the sum is NOT "
         "renormalized, so the RMS adds in power and the peak may pass full "
         "scale (a warning, not an error).\n\n"
-        "Components are edited as a YAML list, one mapping per component, "
-        "exactly as in a scenario file: the panel edits the config rather than "
-        "hiding it. fs / duration / axis come from the rows above unless a "
-        "component states its own axis. File-replay kinds and nested "
-        "composites are not admissible components.\n\n"
+        "The components tab holds one sub-form per component kind (sine / "
+        "multitone / sweep / random / shock), added and removed row by row, "
+        "each on the composite's axis or on its own -- the parts are summed per "
+        "axis. The YAML tab "
+        "shows the same components as a scenario file carries them, for what "
+        "the sub-forms do not cover; switching tabs converts between the two. "
+        "fs / duration are not per component: the grid is defined once, on the "
+        "composite above. File-replay kinds and nested composites are not "
+        "admissible components.\n\n"
         "Noise components: component 0 inherits the run seed, later ones get a "
         "deterministic sub-seed from their position; give a component its own "
         "'seed:' to pin its realization irrespective of position.",
@@ -187,6 +193,47 @@ def _spin(
     return box
 
 
+def _note(label: QLabel) -> QLabel:
+    """Style a label as an inline explanatory note (same look as the ``about`` row)."""
+    label.setWordWrap(True)
+    label.setStyleSheet("color: #808080; font-style: italic;")
+    return label
+
+
+#: ``(minimum, maximum, decimals)`` of the tone-row spin boxes. Shared by the
+#: row builder and by :meth:`_MultitoneForm.load_tones`, so "can this widget
+#: hold that value exactly?" is answered from one place (S-23).
+_TONE_FREQ = (0.1, 1.0e5, 2)
+_TONE_AMP = (1.0e-3, 200.0, 3)
+_TONE_PHASE = (-3.1416, 3.1416, 3)
+
+
+def _fits(value: object, spec: tuple[float, float, int]) -> bool:
+    """Return whether a config value fits a spin box exactly (range + step).
+
+    Parameters
+    ----------
+    value : object
+        Candidate value from a configuration mapping.
+    spec : tuple
+        ``(minimum, maximum, decimals)`` of the target spin box.
+
+    Returns
+    -------
+    bool
+        ``True`` when the widget would store the value unchanged. A value it
+        would clamp or round is *not* representable: the form declines to load
+        it rather than silently rewriting the user's config (S-23).
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    number = float(value)
+    minimum, maximum, decimals = spec
+    if not minimum <= number <= maximum:
+        return False
+    return abs(round(number, decimals) - number) <= max(1e-12, abs(number) * 1e-9)
+
+
 @dataclass
 class _ToneRow:
     """Widgets of one multitone component row."""
@@ -211,7 +258,7 @@ class _MultitoneForm(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._rows: list[_ToneRow] = []
-        self._phase = QCheckBox("include per-tone phase")
+        self._phase = QCheckBox(t("include per-tone phase"))
         self._phase.toggled.connect(self._on_phase_toggled)
         self._add_button = QPushButton(t("+ component"))
         self._add_button.clicked.connect(lambda: self._add_row(240.0, 0.5, 0.0))
@@ -230,9 +277,9 @@ class _MultitoneForm(QWidget):
 
     def _add_row(self, freq: float, amp: float, phase: float) -> None:
         """Append a tone row pre-filled with the given values."""
-        freq_spin = _spin(0.1, 1.0e5, freq, decimals=2, step=10.0)
-        amp_spin = _spin(1e-3, 200.0, amp, decimals=3, step=0.1)
-        phase_spin = _spin(-3.1416, 3.1416, phase, decimals=3, step=0.1)
+        freq_spin = _spin(_TONE_FREQ[0], _TONE_FREQ[1], freq, decimals=_TONE_FREQ[2], step=10.0)
+        amp_spin = _spin(_TONE_AMP[0], _TONE_AMP[1], amp, decimals=_TONE_AMP[2], step=0.1)
+        phase_spin = _spin(_TONE_PHASE[0], _TONE_PHASE[1], phase, decimals=_TONE_PHASE[2], step=0.1)
         phase_label = QLabel(t("phase [rad]"))
         remove = QPushButton(t("x"))
         remove.setMaximumWidth(28)
@@ -293,6 +340,38 @@ class _MultitoneForm(QWidget):
             phase = float(tone[2]) if len(tone) >= 3 else 0.0
             self._add_row(freq, amp, phase)
 
+    def load_tones(self, tones: object) -> bool:
+        """Replace the rows from a *configuration* value, if it is representable.
+
+        Unlike :meth:`set_tones` -- which restores a payload this widget itself
+        produced -- this accepts arbitrary parsed YAML and answers whether the
+        rows can hold it exactly (S-23). Only the compact sequence form is
+        accepted; the mapping form of ``Tone`` stays on the YAML path.
+
+        Parameters
+        ----------
+        tones : object
+            Candidate ``tones`` value of a ``multitone`` component.
+
+        Returns
+        -------
+        bool
+            ``True`` when the rows now hold exactly that value, ``False`` when
+            nothing was changed because the value is not representable.
+        """
+        if not isinstance(tones, (list, tuple)) or not tones:
+            return False
+        parsed: list[list[float]] = []
+        for tone in tones:
+            if not isinstance(tone, (list, tuple)) or not 2 <= len(tone) <= 3:
+                return False
+            specs = (_TONE_FREQ, _TONE_AMP, _TONE_PHASE)
+            if not all(_fits(value, spec) for value, spec in zip(tone, specs, strict=False)):
+                return False
+            parsed.append([float(value) for value in tone])
+        self.set_tones(parsed)
+        return True
+
     def tones(self) -> list[list[float]]:
         """Collect the tones as ``[[f, a]]`` or ``[[f, a, phase]]`` lists."""
         include_phase = self._phase.isChecked()
@@ -305,14 +384,549 @@ class _MultitoneForm(QWidget):
         return tones
 
 
-class _CompositeForm(QWidget):
-    """Components of a ``composite`` excitation, edited as a YAML list (S-21).
+# --------------------------------------------------------------------------- #
+# Composite components: one sub-form per component kind (task S-23).
+# --------------------------------------------------------------------------- #
+#: Kinds admissible as a composite component -- the generated kinds minus the
+#: composite itself (file replay and nesting are excluded, doc 11 §2.1.4).
+_COMPONENT_KINDS = tuple(kind for kind in _KINDS if kind in _GENERATED and kind != "composite")
 
-    Config-first (doc 13, coordination 2026-07-29): the panel edits the very
-    mapping a scenario file carries, so anything buildable in the GUI is
-    expressible in YAML and vice versa. A per-kind sub-form for every component
-    would mean a second, partial copy of this whole widget; that stays out of
-    S-21 by scope (a GUI backlog candidate).
+#: Excitation axes (doc 00); a composite sums its parts per axis (doc 11 §2.1.4).
+_AXES = ("x", "y", "z")
+
+#: Index of the "inherit the composite axis" entry of a component's axis combo.
+#: A component that does not name an axis takes the composite's (doc 11 §2.1.4),
+#: so the sentinel is the *absence* of the key, not a value of it.
+_AXIS_INHERIT = 0
+
+_GRID_NOTE = (
+    "Sampling grid of every component: fs = {fs} Hz, duration = {dur} s. The "
+    "grid is defined once, above, on the composite -- a component that "
+    "disagreed with it would be a loud error (doc 11 §2.1.4), so it is not "
+    "editable per component here."
+)
+_SEED_NOTE = (
+    "Seeding (doc 11 §2.1.5): the first component inherits the run seed, later "
+    "ones get a deterministic sub-seed from their position -- appending never "
+    "moves the existing noise streams. A noise component can pin its own seed "
+    "instead, and then keeps its realization wherever it sits."
+)
+_OVER_MODULATION_NOTE = (
+    "Depth m > 1 is rejected when the run starts: the envelope changes sign and "
+    "m stops being an amplitude ratio (doc 11 §2.1.3). The same waveform is "
+    "expressible exactly as three sine components -- the carrier a_c at f_c "
+    "plus two sidebands m*a_c/2 at f_c +- f_m."
+)
+_YAML_ONLY_NOTE = (
+    "These components stay on the YAML path: the sub-forms cannot hold them "
+    "exactly (an unknown field, a PSD noise level, a value outside a field's "
+    "range or step). They are edited here rather than silently rounded."
+)
+
+
+def _load_spin(spin: QDoubleSpinBox, value: object) -> bool:
+    """Set a spin box from a configuration value, if it is representable.
+
+    Parameters
+    ----------
+    spin : QDoubleSpinBox
+        Target widget.
+    value : object
+        Candidate value from a component mapping.
+
+    Returns
+    -------
+    bool
+        ``True`` when the widget now holds the value exactly; ``False`` (nothing
+        set) when it would clamp or round it -- such a component is left to the
+        YAML path instead of being silently rewritten (S-23).
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    if not _fits(value, (spin.minimum(), spin.maximum(), spin.decimals())):
+        return False
+    spin.setValue(float(value))
+    return True
+
+
+class _ComponentForm(QWidget):
+    """Kind-specific fields of one composite component (task S-23).
+
+    Subclasses own the fields of a single ``kind`` and answer two questions:
+    what payload they hold, and whether they can hold a given mapping *exactly*.
+    They carry no signal logic -- the payload is validated by
+    ``build_excitation_spec`` like every other page (09 §9).
+    """
+
+    #: Component ``kind`` this page edits.
+    KIND = ""
+    #: Configuration keys the page can hold.
+    KEYS: tuple[str, ...] = ()
+    #: Keys accepted, and dropped, when they carry their model default (so a
+    #: round-tripped ``model_dump`` still opens in the form).
+    DEFAULTS: ClassVar[dict[str, object]] = {}
+
+    def payload(self) -> dict[str, Any]:
+        """Return the kind-specific fields of the component."""
+        raise NotImplementedError
+
+    def load(self, data: Mapping[str, Any]) -> bool:
+        """Fill the fields from a component mapping.
+
+        Parameters
+        ----------
+        data : Mapping[str, Any]
+            Component fields without ``kind`` / ``axis`` / the grid.
+
+        Returns
+        -------
+        bool
+            ``True`` when the widgets now hold the mapping exactly.
+        """
+        raise NotImplementedError
+
+    def _unknown(self, data: Mapping[str, Any]) -> bool:
+        """Return whether *data* carries a key this page cannot hold."""
+        return any(key not in self.KEYS for key in data)
+
+
+class _SineComponentForm(_ComponentForm):
+    """A ``sine`` component with the opt-in AM/FM carrier (doc 11 §2.1.3).
+
+    The depth spin box deliberately reaches past the admissible ``m <= 1``: a
+    config that carries an over-modulation is loaded as written and explained,
+    not clamped into a different signal. The authoritative rejection stays in
+    ``AmModulation`` (10 §7), which names the three-tone route in its message.
+    """
+
+    KIND = "sine"
+    KEYS = ("frequency_hz", "amplitude_g", "phase_rad", "modulation")
+    _MOD_KEYS = ("kind", "f_m_hz", "depth", "deviation_hz", "phase_rad")
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._freq = _spin(0.1, 1.0e5, 1000.0, decimals=4, step=10.0)
+        self._amp = _spin(1.0e-6, 200.0, 1.0, decimals=6, step=0.1)
+        self._phase = _spin(-6.2832, 6.2832, 0.0, decimals=4, step=0.1)
+        self._mod = QComboBox()
+        self._mod.addItems(_MODULATIONS)
+        self._mod_fm = _spin(1.0e-3, 1.0e5, 37.0, decimals=4, step=1.0)
+        self._mod_depth = _spin(0.0, 2.0, 0.4, decimals=4, step=0.05)
+        self._mod_dev = _spin(0.0, 1.0e5, 50.0, decimals=4, step=1.0)
+        self._mod_phase = _spin(-6.2832, 6.2832, 0.0, decimals=4, step=0.1)
+        self._warning = QLabel(t(_OVER_MODULATION_NOTE))
+        self._warning.setWordWrap(True)
+        self._warning.setStyleSheet("color: #b00020;")
+        self._fm_label = QLabel(t("f mod [Hz]"))
+        self._depth_label = QLabel(t("depth m"))
+        self._dev_label = QLabel(t("deviation [Hz]"))
+        self._mod_phase_label = QLabel(t("mod phase [rad]"))
+
+        form = QFormLayout(self)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.addRow(t("frequency [Hz]"), self._freq)
+        form.addRow(t("amplitude [g]"), self._amp)
+        form.addRow(t("phase [rad]"), self._phase)
+        form.addRow(t("modulation"), self._mod)
+        form.addRow(self._fm_label, self._mod_fm)
+        form.addRow(self._depth_label, self._mod_depth)
+        form.addRow(self._dev_label, self._mod_dev)
+        form.addRow(self._mod_phase_label, self._mod_phase)
+        form.addRow(self._warning)
+
+        self._mod.currentTextChanged.connect(self._on_mode_changed)
+        self._mod_depth.valueChanged.connect(lambda _value: self._update_warning())
+        self._on_mode_changed(self._mod.currentText())
+
+    def _on_mode_changed(self, mode: str) -> None:
+        """Show only the fields the selected modulator needs (doc 11 §2.1.3)."""
+        modulated = mode != "none"
+        for label, widget in (
+            (self._fm_label, self._mod_fm),
+            (self._mod_phase_label, self._mod_phase),
+        ):
+            label.setVisible(modulated)
+            widget.setVisible(modulated)
+        self._depth_label.setVisible(mode == "am")
+        self._mod_depth.setVisible(mode == "am")
+        self._dev_label.setVisible(mode == "fm")
+        self._mod_dev.setVisible(mode == "fm")
+        self._update_warning()
+
+    def _update_warning(self) -> None:
+        """Show the over-modulation note while the depth is out of range."""
+        self._warning.setVisible(self._mod.currentText() == "am" and self._mod_depth.value() > 1.0)
+
+    def payload(self) -> dict[str, Any]:
+        """Return the sine fields, with ``modulation`` only when opted in."""
+        base: dict[str, Any] = {
+            "frequency_hz": self._freq.value(),
+            "amplitude_g": self._amp.value(),
+        }
+        if self._phase.value() != 0.0:
+            base["phase_rad"] = self._phase.value()
+        mode = self._mod.currentText()
+        if mode == "none":
+            return base
+        modulation: dict[str, Any] = {"kind": mode, "f_m_hz": self._mod_fm.value()}
+        if mode == "am":
+            modulation["depth"] = self._mod_depth.value()
+        else:
+            modulation["deviation_hz"] = self._mod_dev.value()
+        if self._mod_phase.value() != 0.0:
+            modulation["phase_rad"] = self._mod_phase.value()
+        base["modulation"] = modulation
+        return base
+
+    def load(self, data: Mapping[str, Any]) -> bool:
+        """Fill the carrier and, when present, its modulator."""
+        if self._unknown(data) or not {"frequency_hz", "amplitude_g"} <= set(data):
+            return False
+        if not _load_spin(self._freq, data["frequency_hz"]):
+            return False
+        if not _load_spin(self._amp, data["amplitude_g"]):
+            return False
+        if not _load_spin(self._phase, data.get("phase_rad", 0.0)):
+            return False
+        modulation = data.get("modulation")
+        if modulation is None:
+            self._mod.setCurrentText("none")
+            self._on_mode_changed("none")
+            return True
+        if not isinstance(modulation, Mapping):
+            return False
+        mode = str(modulation.get("kind", ""))
+        if mode not in ("am", "fm") or any(key not in self._MOD_KEYS for key in modulation):
+            return False
+        if "f_m_hz" not in modulation or not _load_spin(self._mod_fm, modulation["f_m_hz"]):
+            return False
+        if not _load_spin(self._mod_phase, modulation.get("phase_rad", 0.0)):
+            return False
+        if mode == "am":
+            if "depth" not in modulation or not _load_spin(self._mod_depth, modulation["depth"]):
+                return False
+        elif "deviation_hz" not in modulation or not _load_spin(
+            self._mod_dev, modulation["deviation_hz"]
+        ):
+            return False
+        self._mod.setCurrentText(mode)
+        self._on_mode_changed(mode)
+        return True
+
+
+class _MultitoneComponentForm(_ComponentForm):
+    """A ``multitone`` component: the S7-mod tone editor, reused as a sub-form."""
+
+    KIND = "multitone"
+    KEYS = ("tones",)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._tones = _MultitoneForm()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self._tones)
+
+    def payload(self) -> dict[str, Any]:
+        """Return the tone list of this component."""
+        return {"tones": self._tones.tones()}
+
+    def load(self, data: Mapping[str, Any]) -> bool:
+        """Fill the tone rows from a ``tones`` sequence."""
+        if self._unknown(data) or "tones" not in data:
+            return False
+        return self._tones.load_tones(data["tones"])
+
+
+class _SweepComponentForm(_ComponentForm):
+    """A ``sweep`` component: chirp bounds, level and spacing."""
+
+    KIND = "sweep"
+    KEYS = ("f_start_hz", "f_end_hz", "amplitude_g", "method")
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._f0 = _spin(0.1, 1.0e5, 20.0, decimals=4, step=10.0)
+        self._f1 = _spin(0.1, 1.0e5, 2000.0, decimals=4, step=10.0)
+        self._amp = _spin(1.0e-6, 200.0, 1.0, decimals=6, step=0.1)
+        self._method = QComboBox()
+        self._method.addItems(("linear", "log"))
+        form = QFormLayout(self)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.addRow(t("f start [Hz]"), self._f0)
+        form.addRow(t("f end [Hz]"), self._f1)
+        form.addRow(t("amplitude [g]"), self._amp)
+        form.addRow(t("method"), self._method)
+
+    def payload(self) -> dict[str, Any]:
+        """Return the sweep fields of this component."""
+        return {
+            "f_start_hz": self._f0.value(),
+            "f_end_hz": self._f1.value(),
+            "amplitude_g": self._amp.value(),
+            "method": self._method.currentText(),
+        }
+
+    def load(self, data: Mapping[str, Any]) -> bool:
+        """Fill the chirp bounds, level and spacing."""
+        if self._unknown(data) or not {"f_start_hz", "f_end_hz", "amplitude_g"} <= set(data):
+            return False
+        if not _load_spin(self._f0, data["f_start_hz"]):
+            return False
+        if not _load_spin(self._f1, data["f_end_hz"]):
+            return False
+        if not _load_spin(self._amp, data["amplitude_g"]):
+            return False
+        method = str(data.get("method", "linear"))
+        if method not in ("linear", "log"):
+            return False
+        self._method.setCurrentText(method)
+        return True
+
+
+class _RandomComponentForm(_ComponentForm):
+    """A ``random`` component: band, RMS level and the optional pinned seed.
+
+    A ``psd_g2_hz`` level is deliberately *not* offered here -- the standalone
+    ``random`` page does not offer it either, and adding it on one page only
+    would make the two disagree. Such a component stays on the YAML path.
+    """
+
+    KIND = "random"
+    KEYS = ("band_hz", "g_rms", "seed")
+    DEFAULTS: ClassVar[dict[str, object]] = {"shape": "flat", "psd_g2_hz": None}
+    #: Upper bound of the seed spin box (``QSpinBox`` is 32-bit); a wider seed
+    #: is representable in YAML only.
+    _SEED_MAX = 2_147_483_647
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._lo = _spin(0.0, 1.0e5, 20.0, decimals=4, step=10.0)
+        self._hi = _spin(0.1, 1.0e5, 2000.0, decimals=4, step=10.0)
+        self._grms = _spin(1.0e-6, 200.0, 0.05, decimals=6, step=0.01)
+        self._own_seed = QCheckBox(t("own seed"))
+        self._seed = QSpinBox()
+        self._seed.setRange(0, self._SEED_MAX)
+        self._seed.setValue(4242)
+        self._seed.setEnabled(False)
+        self._own_seed.toggled.connect(self._seed.setEnabled)
+        seed_row = QHBoxLayout()
+        seed_row.setContentsMargins(0, 0, 0, 0)
+        seed_row.addWidget(self._own_seed)
+        seed_row.addWidget(self._seed)
+        seed_holder = QWidget()
+        seed_holder.setLayout(seed_row)
+        form = QFormLayout(self)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.addRow(t("band lo [Hz]"), self._lo)
+        form.addRow(t("band hi [Hz]"), self._hi)
+        form.addRow(t("g RMS [g]"), self._grms)
+        form.addRow(t("seed"), seed_holder)
+
+    def payload(self) -> dict[str, Any]:
+        """Return the band, level and (when pinned) the component seed."""
+        base: dict[str, Any] = {
+            "band_hz": [self._lo.value(), self._hi.value()],
+            "g_rms": self._grms.value(),
+        }
+        if self._own_seed.isChecked():
+            base["seed"] = self._seed.value()
+        return base
+
+    def load(self, data: Mapping[str, Any]) -> bool:
+        """Fill the band, level and pinned seed."""
+        if self._unknown(data):
+            return False
+        band = data.get("band_hz")
+        if not isinstance(band, (list, tuple)) or len(band) != 2:
+            return False
+        if not _load_spin(self._lo, band[0]) or not _load_spin(self._hi, band[1]):
+            return False
+        if not _load_spin(self._grms, data.get("g_rms")):
+            return False
+        seed = data.get("seed")
+        if seed is not None:
+            if isinstance(seed, bool) or not isinstance(seed, int):
+                return False
+            if not 0 <= seed <= self._SEED_MAX:
+                return False
+            self._seed.setValue(seed)
+        self._own_seed.setChecked(seed is not None)
+        return True
+
+
+class _ShockComponentForm(_ComponentForm):
+    """A ``shock`` component: half-sine peak, width and pre-delay."""
+
+    KIND = "shock"
+    KEYS = ("peak_g", "pulse_ms", "delay_s")
+    DEFAULTS: ClassVar[dict[str, object]] = {"shape": "half_sine"}
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._peak = _spin(1.0e-3, 1.0e4, 50.0, decimals=4, step=1.0)
+        self._pulse = _spin(0.01, 1000.0, 2.0, decimals=4, step=0.1)
+        self._delay = _spin(0.0, 60.0, 0.1, decimals=4, step=0.05)
+        form = QFormLayout(self)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.addRow(t("peak [g]"), self._peak)
+        form.addRow(t("pulse [ms]"), self._pulse)
+        form.addRow(t("delay [s]"), self._delay)
+
+    def payload(self) -> dict[str, Any]:
+        """Return the pulse fields of this component."""
+        return {
+            "peak_g": self._peak.value(),
+            "pulse_ms": self._pulse.value(),
+            "delay_s": self._delay.value(),
+        }
+
+    def load(self, data: Mapping[str, Any]) -> bool:
+        """Fill peak, width and pre-delay."""
+        if self._unknown(data) or not {"peak_g", "pulse_ms"} <= set(data):
+            return False
+        if not _load_spin(self._peak, data["peak_g"]):
+            return False
+        if not _load_spin(self._pulse, data["pulse_ms"]):
+            return False
+        return _load_spin(self._delay, data.get("delay_s", 0.0))
+
+
+class _ComponentRow(QWidget):
+    """One composite component: kind, axis and the sub-form of that kind (S-23).
+
+    The axis lives on the row rather than inside the kind pages because every
+    kind has one: a composite sums its parts *per axis* (design decision 5 of
+    SW-71), which is what lets one run drive several axes at once.
+    """
+
+    def __init__(
+        self,
+        on_remove: Callable[[_ComponentRow], None],
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._kind = QComboBox()
+        self._kind.addItems(_COMPONENT_KINDS)
+        self._axis = QComboBox()
+        self._axis.addItem(t("inherit"))
+        self._axis.addItems(_AXES)
+        remove = QPushButton(t("x"))
+        remove.setMaximumWidth(28)
+        remove.clicked.connect(lambda: on_remove(self))
+
+        self._stack = QStackedWidget()
+        self._forms: dict[str, _ComponentForm] = {}
+        for factory in (
+            _SineComponentForm,
+            _MultitoneComponentForm,
+            _SweepComponentForm,
+            _RandomComponentForm,
+            _ShockComponentForm,
+        ):
+            form = factory()
+            self._forms[form.KIND] = form
+            self._stack.addWidget(form)
+        self._kind.currentTextChanged.connect(self._on_kind_changed)
+
+        header = QHBoxLayout()
+        header.addWidget(QLabel(t("component")))
+        header.addWidget(self._kind)
+        header.addWidget(QLabel(t("axis")))
+        header.addWidget(self._axis)
+        header.addStretch(1)
+        header.addWidget(remove)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 4, 0, 4)
+        layout.addLayout(header)
+        layout.addWidget(self._stack)
+        self._on_kind_changed(self._kind.currentText())
+
+    def _on_kind_changed(self, kind: str) -> None:
+        """Show the sub-form of the selected component kind."""
+        self._stack.setCurrentWidget(self._forms[kind])
+
+    def payload(self) -> dict[str, Any]:
+        """Return the component mapping (``kind``, its fields, and ``axis`` if named).
+
+        ``axis`` is emitted only when the row names one: leaving it inherited is
+        what keeps the composite's own axis row meaningful (doc 11 §2.1.4).
+        """
+        kind = self._kind.currentText()
+        base: dict[str, Any] = {"kind": kind}
+        if self._axis.currentIndex() != _AXIS_INHERIT:
+            base["axis"] = self._axis.currentText()
+        base.update(self._forms[kind].payload())
+        return base
+
+    def load(self, data: Mapping[str, Any], grid: tuple[float, float]) -> bool:
+        """Fill the row from a component mapping.
+
+        Parameters
+        ----------
+        data : Mapping[str, Any]
+            One entry of a ``components`` list.
+        grid : tuple of float
+            The composite's ``(fs_hz, duration_s)``. A component may restate the
+            shared grid, but a component that *disagrees* with it is a loud error
+            (doc 11 §2.1.4) and is left to the YAML path, where the run reports
+            it, rather than being quietly adopted here.
+
+        Returns
+        -------
+        bool
+            ``True`` when the row now holds the mapping exactly.
+        """
+        kind = data.get("kind")
+        if not isinstance(kind, str) or kind not in self._forms:
+            return False
+        axis = data.get("axis")
+        if axis is not None and axis not in _AXES:
+            return False
+        fields: dict[str, Any] = {}
+        for key, value in data.items():
+            if key in ("kind", "axis"):
+                continue
+            if key in ("fs_hz", "duration_s"):
+                shared = grid[0] if key == "fs_hz" else grid[1]
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    return False
+                if float(value) != shared:
+                    return False
+                continue
+            fields[key] = value
+        form = self._forms[kind]
+        fields = {
+            key: value
+            for key, value in fields.items()
+            if not (key in form.DEFAULTS and value == form.DEFAULTS[key])
+        }
+        if not form.load(fields):
+            return False
+        self._kind.setCurrentText(kind)
+        if axis is None:
+            self._axis.setCurrentIndex(_AXIS_INHERIT)
+        else:
+            self._axis.setCurrentText(str(axis))
+        return True
+
+
+class _CompositeForm(QWidget):
+    """Components of a ``composite`` excitation: per-kind sub-forms + YAML (S-23).
+
+    Config-first (doc 13, coordination 2026-07-29) now holds in both directions:
+    the *components* tab edits the very mapping a scenario file carries, and the
+    *YAML* tab shows that mapping as text. Switching tabs converts, so the text
+    path S-21 shipped is kept beside the forms, not replaced by them -- it stays
+    the way to express what the sub-forms do not cover.
+
+    A component is loaded into the forms only when they can hold it **exactly**.
+    An unknown field, a ``psd_g2_hz`` noise level, a value a spin box would round
+    or clamp, or a component grid that contradicts the composite -- each keeps
+    the whole list on the YAML tab, with the reason on screen. Rounding a user's
+    config on the way through a form would be a silent failure (10 §7); an extra
+    tab is not.
 
     Text that does not parse is passed through unchanged: validation then fails
     loudly in ``build_excitation_spec``, where the main window already reports
@@ -320,27 +934,175 @@ class _CompositeForm(QWidget):
     language rebuild) call outside a try block.
     """
 
-    _PLACEHOLDER = (
-        "- kind: sine\n"
-        "  frequency_hz: 1000.0\n"
-        "  amplitude_g: 1.0\n"
-        "  modulation: {kind: am, f_m_hz: 37.0, depth: 0.4}\n"
-        "- kind: random\n"
-        "  band_hz: [20.0, 2000.0]\n"
-        "  g_rms: 0.05\n"
+    #: Components of a freshly-built page: an AM carrier over a noise floor --
+    #: the stimulus the S-21 text placeholder carried, now as rows.
+    _DEFAULT: tuple[dict[str, Any], ...] = (
+        {
+            "kind": "sine",
+            "frequency_hz": 1000.0,
+            "amplitude_g": 1.0,
+            "modulation": {"kind": "am", "f_m_hz": 37.0, "depth": 0.4},
+        },
+        {"kind": "random", "band_hz": [20.0, 2000.0], "g_rms": 0.05},
     )
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._rows: list[_ComponentRow] = []
+        self._grid: tuple[float, float] = (0.0, 0.0)
+        self._syncing = False
+
+        self._grid_note = _note(QLabel())
+        self._seed_note = _note(QLabel(t(_SEED_NOTE)))
+        self._yaml_note = _note(QLabel(t(_YAML_ONLY_NOTE)))
+        self._yaml_note.setVisible(False)
+
+        self._rows_box = QVBoxLayout()
+        self._rows_box.setContentsMargins(0, 0, 0, 0)
+        self._add_button = QPushButton(t("+ component"))
+        self._add_button.clicked.connect(lambda: self._add_row())
+
+        form_page = QWidget()
+        form_layout = QVBoxLayout(form_page)
+        form_layout.setContentsMargins(0, 0, 0, 0)
+        form_layout.addWidget(self._grid_note)
+        form_layout.addWidget(self._seed_note)
+        form_layout.addLayout(self._rows_box)
+        form_layout.addWidget(self._add_button)
+
+        self._text = QPlainTextEdit()
+        self._text.setMinimumHeight(140)
+        yaml_page = QWidget()
+        yaml_layout = QVBoxLayout(yaml_page)
+        yaml_layout.setContentsMargins(0, 0, 0, 0)
+        yaml_layout.addWidget(self._yaml_note)
+        yaml_layout.addWidget(self._text)
+
+        self._tabs = QTabWidget()
+        self._tabs.addTab(form_page, t("components"))
+        self._tabs.addTab(yaml_page, "YAML")
+        self._tabs.currentChanged.connect(self._on_tab_changed)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        self._text = QPlainTextEdit()
-        self._text.setPlainText(self._PLACEHOLDER)
-        self._text.setMinimumHeight(140)
-        layout.addWidget(self._text)
+        layout.addWidget(self._tabs)
 
+        for component in self._DEFAULT:
+            self._add_row(component)
+        self.set_grid(0.0, 0.0)
+        self._dump()
+
+    # -- grid ---------------------------------------------------------------
+    def set_grid(self, fs_hz: float, duration_s: float) -> None:
+        """Adopt the composite's sampling grid -- shown here, never edited here.
+
+        Parameters
+        ----------
+        fs_hz : float
+            Sampling frequency of the composite, Hz.
+        duration_s : float
+            Record length of the composite, s.
+        """
+        self._grid = (fs_hz, duration_s)
+        self._grid_note.setText(t(_GRID_NOTE, fs=f"{fs_hz:g}", dur=f"{duration_s:g}"))
+
+    # -- rows ---------------------------------------------------------------
+    def count(self) -> int:
+        """Return the number of component rows (exposed for tests)."""
+        return len(self._rows)
+
+    def _add_row(self, component: Mapping[str, Any] | None = None) -> _ComponentRow:
+        """Append a component row, optionally pre-filled from a mapping."""
+        row = _ComponentRow(self._remove_row)
+        if component is not None:
+            row.load(component, self._grid)
+        self._rows.append(row)
+        self._rows_box.addWidget(row)
+        return row
+
+    def _remove_row(self, row: _ComponentRow) -> None:
+        """Remove a component row (keeping at least one component)."""
+        if len(self._rows) <= 1 or row not in self._rows:
+            return
+        self._rows.remove(row)
+        self._rows_box.removeWidget(row)
+        row.setParent(None)
+        row.deleteLater()
+
+    def _clear_rows(self) -> None:
+        """Drop every component row."""
+        for row in list(self._rows):
+            self._rows.remove(row)
+            self._rows_box.removeWidget(row)
+            row.setParent(None)
+            row.deleteLater()
+
+    def _load_rows(self, components: object) -> bool:
+        """Rebuild the rows from a parsed component list, if representable.
+
+        Candidate rows are built aside and committed only when *every* component
+        loads: a half-applied list would be a config the user never wrote.
+        """
+        if not isinstance(components, (list, tuple)) or not components:
+            return False
+        candidates: list[_ComponentRow] = []
+        loaded = True
+        for component in components:
+            if not isinstance(component, Mapping):
+                loaded = False
+                break
+            row = _ComponentRow(self._remove_row)
+            candidates.append(row)
+            if not row.load(component, self._grid):
+                loaded = False
+                break
+        if not loaded:
+            for row in candidates:
+                row.deleteLater()
+            return False
+        self._clear_rows()
+        for row in candidates:
+            self._rows.append(row)
+            self._rows_box.addWidget(row)
+        return True
+
+    # -- the two views ------------------------------------------------------
+    def _dump(self) -> None:
+        """Write the current rows into the YAML view."""
+        payload = [row.payload() for row in self._rows]
+        self._text.setPlainText(yaml.safe_dump(payload, sort_keys=False))
+
+    def _show_tab(self, index: int) -> None:
+        """Switch tabs without triggering the conversion handler."""
+        self._syncing = True
+        try:
+            self._tabs.setCurrentIndex(index)
+        finally:
+            self._syncing = False
+
+    def _on_tab_changed(self, index: int) -> None:
+        """Convert between the two views when the user switches tabs."""
+        if self._syncing:
+            return
+        if index == 1:
+            self._dump()
+            self._yaml_note.setVisible(False)
+            return
+        try:
+            parsed = yaml.safe_load(self._text.toPlainText())
+        except yaml.YAMLError:
+            parsed = None
+        if self._load_rows(parsed):
+            self._yaml_note.setVisible(False)
+            return
+        self._yaml_note.setVisible(True)
+        self._show_tab(1)
+
+    # -- payload ------------------------------------------------------------
     def components(self) -> Any:
-        """Return the parsed component list (or the raw text if it does not parse)."""
+        """Return the component list of the active view (or the raw text)."""
+        if self._tabs.currentIndex() == 0:
+            return [row.payload() for row in self._rows]
         text = self._text.toPlainText()
         try:
             parsed = yaml.safe_load(text)
@@ -352,8 +1114,19 @@ class _CompositeForm(QWidget):
         """Restore the editor from a payload value (list or raw text)."""
         if isinstance(components, str):
             self._text.setPlainText(components)
-        elif components:
-            self._text.setPlainText(yaml.safe_dump(components, sort_keys=False))
+            self._yaml_note.setVisible(True)
+            self._show_tab(1)
+            return
+        if not components:
+            return
+        if self._load_rows(components):
+            self._dump()
+            self._yaml_note.setVisible(False)
+            self._show_tab(0)
+            return
+        self._text.setPlainText(yaml.safe_dump(list(components), sort_keys=False))
+        self._yaml_note.setVisible(True)
+        self._show_tab(1)
 
 
 class ExcitationBuilder(QWidget):
@@ -485,8 +1258,11 @@ class ExcitationBuilder(QWidget):
             )
         )
 
-        # composite (config-first: the components are edited as YAML rows)
+        # composite (config-first: per-kind sub-forms beside the YAML view)
         self._composite = _CompositeForm()
+        self._composite.set_grid(self._fs.value(), self._duration.value())
+        self._fs.valueChanged.connect(self._on_grid_changed)
+        self._duration.valueChanged.connect(self._on_grid_changed)
         self._stack.addWidget(self._form([("components", self._composite)], about="composite"))
 
         # csv
@@ -668,6 +1444,10 @@ class ExcitationBuilder(QWidget):
         path, _ = QFileDialog.getOpenFileName(self, "Select file", "", file_filter)
         if path:
             target.setText(path)
+
+    def _on_grid_changed(self, _value: float) -> None:
+        """Mirror the composite sampling grid into the component page (doc 11 §2.1.4)."""
+        self._composite.set_grid(self._fs.value(), self._duration.value())
 
     def _on_modulation_changed(self, mode: str) -> None:
         """Show only the fields the selected carrier modulator needs."""

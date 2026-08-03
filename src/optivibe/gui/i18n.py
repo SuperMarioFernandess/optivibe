@@ -1111,6 +1111,8 @@ CATALOG: dict[str, dict[str, str]] = {
         "What drives the sensor along the chosen axis:\n\n"
         "sine / multitone / sweep / random / shock -- GENERATED waveforms on the "
         "sampling grid below (fs, duration).\n"
+        "composite -- the SUM of several generated components on that same grid "
+        "(levels are not renormalized).\n"
         "csv / wav / tdms / uff / mat / hdf5 -- REPLAY of a recorded acceleration "
         "from a file (the grid comes from the file or the page fields; the "
         "sampling row is hidden).\n\nThe excitation is ground acceleration in g "
@@ -1118,6 +1120,8 @@ CATALOG: dict[str, dict[str, str]] = {
         "Что возбуждает датчик вдоль выбранной оси:\n\n"
         "sine / multitone / sweep / random / shock — ГЕНЕРИРУЕМЫЕ сигналы на сетке "
         "дискретизации ниже (fs, длительность).\n"
+        "composite — СУММА нескольких генерируемых компонент на той же сетке "
+        "(уровни не перенормируются).\n"
         "csv / wav / tdms / uff / mat / hdf5 — ВОСПРОИЗВЕДЕНИЕ записанного "
         "ускорения из файла (сетка берётся из файла или полей страницы; строка "
         "дискретизации скрыта).\n\nВозбуждение — ускорение основания в g вдоль "
@@ -1153,14 +1157,25 @@ CATALOG: dict[str, dict[str, str]] = {
     # excitation per-kind summaries + descriptions
     "exc.sine.summary": _e("single tone", "один тон"),
     "exc.sine.about": _e(
-        "One tone: frequency [Hz] and amplitude [g]. The basic probe of one "
-        "band point -- dominant-frequency recovery, 2f/1f distortion at a "
-        "bias~0 working point, RMS checks. Keep the frequency well below f1 "
-        "for off-resonance use.",
-        "Один тон: частота [Гц] и амплитуда [g]. Базовая проба одной точки полосы "
-        "— восстановление доминанты, искажение 2f/1f в рабочей точке bias~0, "
-        "проверки RMS. Держите частоту значительно ниже f1 для внерезонансной "
-        "работы.",
+        "One tone: frequency [Hz], amplitude [g] and an optional phase [rad]. "
+        "The basic probe of one band point -- dominant-frequency recovery, "
+        "2f/1f distortion at a bias~0 working point, RMS checks. Keep the "
+        "frequency well below f1 for off-resonance use.\n\n"
+        "Modulation (optional, doc 11 §2.1.3) turns the tone into a carrier: "
+        "AM adds one sideband pair of amplitude m*a_c/2 at f_c +- f_m; FM adds "
+        "the Bessel family a_c*|J_k(beta)| at f_c +- k*f_m with "
+        "beta = deviation/f_m. Both are marked in the spectrum by the "
+        "expected-peak layer. Depth m is limited to 0..1; a deeper AM is "
+        "expressible as a composite of carrier + two sideband tones.",
+        "Один тон: частота [Гц], амплитуда [g] и опциональная фаза [рад]. Базовая "
+        "проба одной точки полосы — восстановление доминанты, искажение 2f/1f в "
+        "рабочей точке bias~0, проверки RMS. Держите частоту значительно ниже f1 "
+        "для внерезонансной работы.\n\n"
+        "Модуляция (опционально, док 11 §2.1.3) делает тон несущей: АМ добавляет "
+        "пару боковых амплитудой m·a_c/2 на f_c ± f_m; ЧМ — семейство Бесселя "
+        "a_c·|J_k(β)| на f_c ± k·f_m при β = девиация/f_m. И то, и другое "
+        "размечает слой ожидаемых пиков. Глубина m ограничена 0..1; более "
+        "глубокая АМ выражается композитом из несущей и двух боковых тонов.",
     ),
     "exc.multitone.summary": _e("sum of tones", "сумма тонов"),
     "exc.multitone.about": _e(
@@ -1203,6 +1218,81 @@ CATALOG: dict[str, dict[str, str]] = {
         "Для исследований переходных/перегрузок — сочетайте с механикой "
         "modal_time и временным интегратором (вкладка «Физмодели») для верного "
         "переходного процесса.",
+    ),
+    "exc.composite.summary": _e("sum of components", "сумма компонент"),
+    "exc.composite.about": _e(
+        "The sum of several generated components on one sampling grid (doc 11 "
+        "§2.1.4). Each component keeps the level it declares -- the sum is NOT "
+        "renormalized, so the RMS adds in power and the peak may pass full "
+        "scale (a warning, not an error).\n\n"
+        "The components tab holds one sub-form per component kind (sine / "
+        "multitone / sweep / random / shock), added and removed row by row, "
+        "each on the composite's axis or on its own -- the parts are summed per "
+        "axis. The YAML tab "
+        "shows the same components as a scenario file carries them, for what "
+        "the sub-forms do not cover; switching tabs converts between the two. "
+        "fs / duration are not per component: the grid is defined once, on the "
+        "composite above. File-replay kinds and nested composites are not "
+        "admissible components.\n\n"
+        "Noise components: component 0 inherits the run seed, later ones get a "
+        "deterministic sub-seed from their position; give a component its own "
+        "'seed:' to pin its realization irrespective of position.",
+        "Сумма нескольких генерируемых компонент на одной сетке дискретизации "
+        "(док 11 §2.1.4). Каждая компонента несёт свой объявленный уровень — "
+        "сумма НЕ перенормируется, поэтому СКЗ складываются по мощности, а пик "
+        "может выйти за полную шкалу (предупреждение, не ошибка).\n\n"
+        "Вкладка компонент — по под-форме на каждый вид компоненты (sine / "
+        "multitone / sweep / random / shock), добавляются и удаляются строками, "
+        "каждая на оси композита или на своей: части суммируются поосевно. "
+        "Вкладка YAML показывает "
+        "те же компоненты в том виде, в каком их несёт файл сценария, — для "
+        "того, что под-формы не покрывают; переключение вкладок конвертирует. "
+        "fs / длительность не задаются покомпонентно: сетка определяется один "
+        "раз, на композите выше. Файловое воспроизведение и вложенные композиты "
+        "компонентами не допускаются.\n\n"
+        "Шумовые компоненты: компонента 0 наследует seed прогона, последующие "
+        "получают детерминированный под-seed от своей позиции; задайте "
+        "компоненте собственный «seed:», чтобы закрепить её реализацию "
+        "независимо от позиции.",
+    ),
+    "exc.composite.grid_note": _e(
+        "Sampling grid of every component: fs = {fs} Hz, duration = {dur} s. The "
+        "grid is defined once, above, on the composite -- a component that "
+        "disagreed with it would be a loud error (doc 11 §2.1.4), so it is not "
+        "editable per component here.",
+        "Сетка дискретизации всех компонент: fs = {fs} Гц, длительность = {dur} с. "
+        "Сетка задаётся один раз, выше, на композите — компонента, объявившая "
+        "иную, была бы громкой ошибкой (док 11 §2.1.4), поэтому покомпонентно "
+        "она здесь не редактируется.",
+    ),
+    "exc.composite.seed_note": _e(
+        "Seeding (doc 11 §2.1.5): the first component inherits the run seed, later "
+        "ones get a deterministic sub-seed from their position -- appending never "
+        "moves the existing noise streams. A noise component can pin its own seed "
+        "instead, and then keeps its realization wherever it sits.",
+        "Посев (док 11 §2.1.5): первая компонента наследует seed прогона, "
+        "последующие получают детерминированный под-seed от своей позиции — "
+        "дописывание в конец не двигает уже существующие шумовые потоки. Шумовая "
+        "компонента может вместо этого закрепить свой seed и тогда сохраняет свою "
+        "реализацию, где бы ни стояла.",
+    ),
+    "exc.composite.overmod_note": _e(
+        "Depth m > 1 is rejected when the run starts: the envelope changes sign and "
+        "m stops being an amplitude ratio (doc 11 §2.1.3). The same waveform is "
+        "expressible exactly as three sine components -- the carrier a_c at f_c "
+        "plus two sidebands m*a_c/2 at f_c +- f_m.",
+        "Глубина m > 1 отвергается при запуске: огибающая меняет знак и m перестаёт "
+        "быть отношением амплитуд (док 11 §2.1.3). Та же волна точно выражается "
+        "тремя sine-компонентами — несущая a_c на f_c плюс две боковые m·a_c/2 на "
+        "f_c ± f_m.",
+    ),
+    "exc.composite.yaml_note": _e(
+        "These components stay on the YAML path: the sub-forms cannot hold them "
+        "exactly (an unknown field, a PSD noise level, a value outside a field's "
+        "range or step). They are edited here rather than silently rounded.",
+        "Эти компоненты остаются на YAML-пути: под-формы не могут удержать их "
+        "точно (неизвестное поле, уровень шума через PSD, значение вне диапазона "
+        "или шага поля). Они правятся здесь, а не округляются молча.",
     ),
     "exc.csv.summary": _e("CSV replay", "воспроизв. CSV"),
     "exc.csv.about": _e(
@@ -1275,6 +1365,18 @@ CATALOG: dict[str, dict[str, str]] = {
     "exc.row.dataset": _e("dataset", "набор"),
     "exc.row.dataset_index": _e("dataset index", "индекс набора"),
     "exc.row.data_key": _e("data key", "ключ данных"),
+    "exc.row.modulation": _e("modulation", "модуляция"),
+    "exc.row.f_mod": _e("f mod [Hz]", "f мод [Гц]"),
+    "exc.row.depth": _e("depth m", "глубина m"),
+    "exc.row.deviation": _e("deviation [Hz]", "девиация [Гц]"),
+    "exc.row.mod_phase": _e("mod phase [rad]", "фаза мод. [рад]"),
+    "exc.row.tone_phase": _e("include per-tone phase", "фаза у каждого тона"),
+    "exc.row.component": _e("component", "компонента"),
+    "exc.row.axis": _e("axis", "ось"),
+    "exc.row.axis_inherit": _e("inherit", "как у композита"),
+    "exc.row.seed": _e("seed", "seed"),
+    "exc.row.own_seed": _e("own seed", "свой seed"),
+    "exc.row.fs_from_file": _e("fs [Hz] (0=file)", "fs [Гц] (0=из файла)"),
     "exc.row.add_component": _e("+ component", "+ компонента"),
     "exc.row.remove": _e("x", "x"),
     "exc.row.browse": _e("Browse...", "Обзор..."),

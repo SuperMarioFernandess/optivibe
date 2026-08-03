@@ -273,3 +273,51 @@ def test_streaming_cutoff_help_points_at_the_theory_block() -> None:
     entry = CATALOG["dsp.exp.f_c.help"]
     for lang in LANGUAGES:
         assert "theory-06 §9.3-2" in entry[lang]
+
+
+# --------------------------------------------------------------------------- #
+# Catalog coverage: a page must not half-translate
+# --------------------------------------------------------------------------- #
+#: Texts that are the same in both locales by nature: the inline help glyph and
+#: a format name. Everything else on a page belongs in the catalog.
+_LOCALE_NEUTRAL = ("?", "YAML")
+
+
+def test_catalog_covers_the_excitation_builder_strings(qtbot) -> None:
+    """Every visible string of the excitation panel resolves through the catalog.
+
+    Guards the invariant of SW-65 -- an English source in the code is a msgid,
+    so a string added without its catalog entry degrades a Russian session to
+    English silently. That is exactly what happened between S7-mod and S-21: the
+    modulation rows, the composite page and the per-tone phase box reached the
+    screen untranslated. Scanning the built widget (rather than a hand-kept
+    list) is what keeps a new field from repeating it.
+    """
+    from PySide6.QtWidgets import QAbstractButton, QLabel
+
+    from optivibe.gui.widgets.excitation_builder import (
+        _ABOUT,
+        _AXIS_HELP,
+        _GRID_NOTE,
+        _KIND_HELP,
+        _SAMPLING_HELP,
+        ExcitationBuilder,
+    )
+
+    sources = {_KIND_HELP, _AXIS_HELP, _SAMPLING_HELP, _GRID_NOTE}
+    for summary, about in _ABOUT.values():
+        sources.update((summary, about))
+
+    builder = ExcitationBuilder()
+    qtbot.addWidget(builder)
+    filled_templates = {builder._composite._grid_note.text()}
+    for kind in ("composite", "sine", "multitone", "sweep", "random", "shock"):
+        builder._kind.setCurrentText(kind)
+    for widget in (*builder.findChildren(QLabel), *builder.findChildren(QAbstractButton)):
+        text = widget.text()
+        if text.strip() and text not in filled_templates:
+            sources.add(text)
+
+    index = {entry["en"] for entry in CATALOG.values()}
+    missing = sorted(text for text in sources if text not in index and text not in _LOCALE_NEUTRAL)
+    assert not missing, f"add a catalog entry (both locales) for: {missing}"
