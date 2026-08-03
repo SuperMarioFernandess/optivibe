@@ -174,14 +174,20 @@ def _response_point(
         artifacts.forward.detector,
         variant=variant,
     )
+    # Sample columns are float arrays, so an undefined ratio rides as `nan`
+    # rather than `None` (S-25, `SW-77`: scalar -> None, array element -> nan);
+    # `gain_ratio` and `nea_full_band_ug` already use the same marker, and
+    # `_percentiles` filters non-finite samples out of the summary.
+    thd_recovered = second_harmonic_ratio(amplitude_spectrum(rec, fs_hz), frequency_hz)
+    thd_optical = second_harmonic_ratio(
+        amplitude_spectrum(eta - float(np.mean(eta)), fs_hz), frequency_hz
+    )
     return {
         "applied_rms_g": rms(applied) / G0,
         "recovered_rms_g": rms(rec) / G0,
         "gain_ratio": (rms(rec) / rms(applied)) if rms(applied) > 0 else float("nan"),
-        "thd_recovered_pct": 100.0
-        * second_harmonic_ratio(amplitude_spectrum(rec, fs_hz), frequency_hz),
-        "optical_thd_pct": 100.0
-        * second_harmonic_ratio(amplitude_spectrum(eta - float(np.mean(eta)), fs_hz), frequency_hz),
+        "thd_recovered_pct": 100.0 * thd_recovered if thd_recovered is not None else float("nan"),
+        "optical_thd_pct": 100.0 * thd_optical if thd_optical is not None else float("nan"),
         "peak_dx_um": float(np.max(np.abs(artifacts.forward.tip.dx))) * 1.0e6,
         "n_clipped": float(n_clipped),
         "saturated": 1.0 if n_clipped > 0 else 0.0,

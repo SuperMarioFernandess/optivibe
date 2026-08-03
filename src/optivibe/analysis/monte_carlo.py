@@ -112,7 +112,12 @@ def _perturbed_variant(
 
 
 def _cross_axis_suppression_for(variant: VariantConfig, spec: MonteCarloSpec) -> float:
-    """Recovered cross-axis (y) suppression for one perturbed variant."""
+    """Recovered cross-axis (y) suppression for one perturbed variant.
+
+    An undefined ratio (no off-axis response at all) enters the sample column as
+    ``nan``, the array-side spelling of "undefined" (S-25, `SW-77`);
+    :func:`_percentiles` already drops non-finite samples.
+    """
     stages = StageSelection(detector="photodiode", dsp="standard")
 
     def _run(axis: str) -> FloatArray:
@@ -135,7 +140,8 @@ def _cross_axis_suppression_for(variant: VariantConfig, spec: MonteCarloSpec) ->
 
     rec_x = _run("x")
     rec_y = _run("y")
-    return cross_axis_suppression(rms(rec_y), rms(rec_x))
+    ratio = cross_axis_suppression(rms(rec_y), rms(rec_x))
+    return ratio if ratio is not None else float("nan")
 
 
 def _percentiles(values: FloatArray) -> dict[str, float]:

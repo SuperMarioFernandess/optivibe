@@ -59,10 +59,13 @@ def amplitude_spectrum(signal: FloatArray, fs: float, *, window: str = "boxcar")
     spectrum = np.fft.rfft(signal * win)
     freq = np.fft.rfftfreq(n, d=1.0 / fs).astype(np.float64)
     amplitude = np.abs(spectrum).astype(np.float64) * (2.0 / n) / coherent_gain
-    if amplitude.size:
-        amplitude[0] *= 0.5  # DC is one-sided already
-        if n % 2 == 0:
-            amplitude[-1] *= 0.5  # Nyquist is one-sided already
+    # No empty-array guard: an empty record never reaches this line -- the window
+    # and the rFFT both reject ``n = 0`` above -- so the former ``if
+    # amplitude.size:`` was unreachable by construction (found in S-25, `SW-77`;
+    # dead defensive code reads as a handled case that was never handled).
+    amplitude[0] *= 0.5  # DC is one-sided already
+    if n % 2 == 0:
+        amplitude[-1] *= 0.5  # Nyquist is one-sided already
     return Spectrum(freq=freq, values=amplitude, kind="amplitude", window=window, method="fft")
 
 
@@ -211,15 +214,17 @@ def dominant_frequencies(
     Returns
     -------
     tuple of float
-        Dominant frequencies, Hz, ordered by descending prominence (empty if no
-        peak clears the threshold).
+        Dominant frequencies, Hz, ordered by descending prominence. Empty when
+        no peak clears the threshold **and** when the spectrum is too short to
+        carry a peak at all: prominence is defined against a neighbourhood, and
+        fewer than three bins have none, so a spectrum of one or two bins yields
+        no dominant rather than its bare ``argmax`` (S-25, `SW-77`; the peak
+        categories of doc 20 §3 are all statements about prominence). The empty
+        tuple is already the honest signal every consumer tests for.
     """
     freq = spectrum.freq
     mag = spectrum.values
     if mag.size < 3:
-        if mag.size > 1:
-            idx = int(np.argmax(mag[1:])) + 1
-            return (float(freq[idx]),)
         return ()
 
     def peak_at(index: int) -> float:

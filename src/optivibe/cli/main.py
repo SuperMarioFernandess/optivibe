@@ -374,9 +374,15 @@ def _format_analysis(analysis: InstrumentAnalysis) -> str:
         rms_text = ", ".join(f"{k}={v:.4g}" for k, v in sorted(result.rms.items()))
         lines.append(f"rms      : {rms_text}")
         if result.iso is not None:
-            zone = result.iso.get("zone", "?")
-            v_mm_s = result.iso.get("v_rms_mm_s", float("nan"))
-            lines.append(f"ISO      : zone {zone} (v_rms = {float(str(v_mm_s)):.4g} mm/s)")
+            zone = result.iso.get("zone")
+            v_mm_s = result.iso.get("v_rms_mm_s")
+            if zone is None or v_mm_s is None:
+                # Say so rather than print a zone the chain never graded
+                # (S-25, `SW-77`); the reason is machine-readable in the bag.
+                reason = result.iso.get("undefined_reason") or "undefined"
+                lines.append(f"ISO      : not graded ({reason})")
+            else:
+                lines.append(f"ISO      : zone {zone} (v_rms = {float(str(v_mm_s)):.4g} mm/s)")
     if analysis.nea_full_band_m_s2 is not None:
         lines.append(
             f"NEA      : full band {analysis.nea_full_band_m_s2 / G0 * 1e6:.4g} ug "

@@ -612,12 +612,28 @@ class StreamingDsp:
         cross_residual: dict[str, float] = {}
         if dominant and a.size:
             amp = amplitude_spectrum(a, self._fs)
-            cross_residual["second_harmonic_ratio"] = second_harmonic_ratio(amp, dominant[0])
+            shr = second_harmonic_ratio(amp, dominant[0])
+            if shr is not None:
+                cross_residual["second_harmonic_ratio"] = shr
 
+        # Before the first full segment there is no velocity spectrum at all, so
+        # there is no band RMS to grade. The pre-`SW-77` code substituted 0.0 and
+        # graded it, which put "zone A" on screen for every stream that had not
+        # warmed up yet -- the live path is where a user meets this first, so the
+        # provenance rule of `SW-72` (`warmed`, `dropped_samples`) applies here
+        # too: undefined is reported as undefined, not as a reassuring zero.
         spec_v = self._spec_v.spectrum()
-        v_rms_band = band_rms_velocity(spec_v, self._band) if spec_v is not None else 0.0
+        if spec_v is None:
+            v_rms_band: float | None = None
+            reason: str | None = "spectrum_not_ready"
+        else:
+            v_rms_band = band_rms_velocity(spec_v, self._band)
+            reason = None if v_rms_band is not None else "band_has_fewer_than_two_bins"
         iso: dict[str, object] = iso_assessment(
-            v_rms_band, machine_class=self._options.iso_machine_class, band_hz=self._band
+            v_rms_band,
+            machine_class=self._options.iso_machine_class,
+            band_hz=self._band,
+            undefined_reason=reason,
         )
         if self._nea is not None:
             iso["nea"] = self._nea.as_dict()

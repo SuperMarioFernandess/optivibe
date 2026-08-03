@@ -79,21 +79,28 @@ def classify_velocity_rms(v_rms_mm_s: float, limits: IsoZoneLimits) -> str:
 
 
 def iso_assessment(
-    v_rms_m_s: float,
+    v_rms_m_s: float | None,
     *,
     machine_class: str = _DEFAULT_CLASS,
     band_hz: tuple[float, float] | None = None,
+    undefined_reason: str | None = None,
 ) -> dict[str, object]:
     """Assemble an ISO 10816-3 severity assessment from a band RMS velocity (S5 §4).
 
     Parameters
     ----------
-    v_rms_m_s : float
-        Broadband RMS velocity in the assessment band, m/s (SI).
+    v_rms_m_s : float or None
+        Broadband RMS velocity in the assessment band, m/s (SI). ``None`` means
+        the band RMS velocity is undefined on this input (task S-25, `SW-77`);
+        see the Returns section.
     machine_class : str, optional
         Key into :data:`ISO_10816_3_ZONES` (default ``"group2_rigid"``).
     band_hz : tuple of float or None, optional
         The assessment band ``(f_lo, f_hi)``, Hz, recorded for traceability.
+    undefined_reason : str or None, optional
+        Reason the velocity is undefined, from
+        :data:`~optivibe.dsp.metrics.DEGENERATE_REASONS`; recorded in the bag
+        under ``"undefined_reason"`` when ``v_rms_m_s`` is ``None``.
 
     Returns
     -------
@@ -101,12 +108,36 @@ def iso_assessment(
         Assessment with the standard, machine class, RMS velocity (mm/s and SI),
         zone label and the zone boundaries.
 
+        **No velocity, no grade.** When ``v_rms_m_s`` is ``None`` the bag keeps
+        everything that is still true -- the standard, the machine class, the
+        band, the published boundaries -- and sets ``v_rms_mm_s``, ``v_rms_m_s``
+        and ``zone`` to ``None``, adding ``"undefined_reason"``. Grading a
+        degenerate zero would return zone A ("newly commissioned machine"), the
+        best verdict the standard has, on a measurement that was never made.
+        The defined path is untouched, byte for byte, and adds no key.
+
     Raises
     ------
     KeyError
         If ``machine_class`` is not a known class.
     """
     limits = ISO_10816_3_ZONES[machine_class]
+    boundaries = {
+        "A/B": limits.a_b_mm_s,
+        "B/C": limits.b_c_mm_s,
+        "C/D": limits.c_d_mm_s,
+    }
+    if v_rms_m_s is None:
+        return {
+            "standard": "ISO 10816-3 / 20816-3",
+            "machine_class": limits.machine_class,
+            "v_rms_mm_s": None,
+            "v_rms_m_s": None,
+            "zone": None,
+            "zone_boundaries_mm_s": boundaries,
+            "band_hz": band_hz,
+            "undefined_reason": undefined_reason,
+        }
     v_mm_s = v_rms_m_s * 1.0e3
     zone = classify_velocity_rms(v_mm_s, limits)
     return {
@@ -115,10 +146,6 @@ def iso_assessment(
         "v_rms_mm_s": v_mm_s,
         "v_rms_m_s": v_rms_m_s,
         "zone": zone,
-        "zone_boundaries_mm_s": {
-            "A/B": limits.a_b_mm_s,
-            "B/C": limits.b_c_mm_s,
-            "C/D": limits.c_d_mm_s,
-        },
+        "zone_boundaries_mm_s": boundaries,
         "band_hz": band_hz,
     }

@@ -130,9 +130,13 @@ class StandardDsp:
         amp_for_residual = amplitude_spectrum(accel, fs)
         cross_residual: dict[str, float] = {}
         if dominant:
-            cross_residual["second_harmonic_ratio"] = second_harmonic_ratio(
-                amp_for_residual, dominant[0]
-            )
+            # An undefined ratio leaves the key out, exactly as an absent
+            # dominant already does -- the contract carries floats, and the
+            # consumers (analysis/compare, analysis/instrument, CLI) already
+            # read a missing key as "not defined" (S-25, `SW-77`).
+            shr = second_harmonic_ratio(amp_for_residual, dominant[0])
+            if shr is not None:
+                cross_residual["second_harmonic_ratio"] = shr
 
         band = (variant.band.f_min_hz, variant.band.f_max_hz)
         velocity_psd = welch_psd(
@@ -144,7 +148,10 @@ class StandardDsp:
         )
         v_rms_band = band_rms_velocity(velocity_psd, band)
         iso: dict[str, object] = iso_assessment(
-            v_rms_band, machine_class=options.iso_machine_class, band_hz=band
+            v_rms_band,
+            machine_class=options.iso_machine_class,
+            band_hz=band,
+            undefined_reason=None if v_rms_band is not None else "band_has_fewer_than_two_bins",
         )
 
         # 5. NEA (stand metric): refer the detector noise to the input. The

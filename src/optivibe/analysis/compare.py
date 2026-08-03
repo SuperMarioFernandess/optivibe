@@ -523,10 +523,13 @@ class ChainMetrics:
         Dominant spectral lines, Hz.
     second_harmonic_ratio : float or None
         THD proxy at the leading dominant (04 §5); ``None`` without a dominant.
-    v_rms_band_m_s : float
-        Band-limited RMS velocity behind the ISO grade, m/s.
+    v_rms_band_m_s : float or None
+        Band-limited RMS velocity behind the ISO grade, m/s; ``None`` when the
+        chain could not define it (S-25, `SW-77`), in which case the diff table
+        leaves the cell blank instead of printing a zero that would compare as a
+        real measurement.
     iso_zone : str or None
-        ISO 10816-3 / 20816-3 evaluation zone.
+        ISO 10816-3 / 20816-3 evaluation zone; ``None`` when ungraded.
     """
 
     rms_a: float
@@ -534,7 +537,7 @@ class ChainMetrics:
     rms_x: float
     dominant_freqs_hz: tuple[float, ...]
     second_harmonic_ratio: float | None
-    v_rms_band_m_s: float
+    v_rms_band_m_s: float | None
     iso_zone: str | None
 
     @classmethod
@@ -565,7 +568,7 @@ class ChainMetrics:
                 if "second_harmonic_ratio" in result.cross_residual
                 else None
             ),
-            v_rms_band_m_s=float(v_band) if isinstance(v_band, (int, float)) else 0.0,
+            v_rms_band_m_s=float(v_band) if isinstance(v_band, (int, float)) else None,
             iso_zone=str(zone) if zone is not None else None,
         )
 
