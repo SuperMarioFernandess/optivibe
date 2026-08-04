@@ -16,6 +16,7 @@ all.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -38,9 +39,15 @@ _ENV_VAR = "OPTIVIBE_CONFIG_DIR"
 # Reading YAML: the file must exist and must be a mapping.
 # --------------------------------------------------------------------------- #
 def test_missing_configuration_file_names_the_path(tmp_path: Path) -> None:
-    """A missing file is reported by path, not by traceback (10 §7)."""
+    """A missing file is reported by path, not by traceback (10 §7).
+
+    The path is escaped before it becomes a regex: on Windows it contains
+    backslashes, and a drive-letter path is then not a valid pattern (the
+    backslash before ``Users`` reads as an incomplete unicode escape). What is
+    under test is the message, not the matching.
+    """
     missing = tmp_path / "constants.yaml"
-    with pytest.raises(FileNotFoundError, match=str(missing)):
+    with pytest.raises(FileNotFoundError, match=re.escape(str(missing))):
         load_constants(missing)
 
 
