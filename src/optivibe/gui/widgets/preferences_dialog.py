@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from optivibe.gui.i18n import LANGUAGE_LABELS, LANGUAGES, t
+from optivibe.gui.i18n import LANGUAGE_LABELS, LANGUAGES, t, tr
 from optivibe.gui.theme import THEMES
 
 __all__ = ["PreferencesDialog"]
@@ -83,6 +83,11 @@ class PreferencesDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
+        # Qt labels the standard buttons from its own (unloaded) translations,
+        # so without this the two most visible controls of the dialog stay
+        # English in a Russian session (S-26).
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(tr("prefs.ok"))
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(tr("prefs.cancel"))
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self._on_reject)
 

@@ -188,6 +188,7 @@ class LiveView(QWidget):
         """Refresh static text after a language change (legends refresh on re-run)."""
         self._header.retranslate()
         self._controls.retranslate()
+        self._cantilever.retranslate()
         self._cantilever_check.setText(t("cantilever"))
         self._expected_check.setText(t("expected peaks"))
         for key, label in _PANEL_LABELS:

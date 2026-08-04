@@ -86,6 +86,7 @@ from optivibe.gui.widgets import (
 from optivibe.gui.widgets.compare_panel import SOURCE_RECORD as COMPARE_SOURCE_RECORD
 from optivibe.gui.widgets.live_controls import SOURCE_RECORD
 from optivibe.gui.widgets.preferences_dialog import PreferencesDialog
+from optivibe.gui.widgets.ui_helpers import retranslate_tree
 from optivibe.gui.workers.jobs import (
     CompareJob,
     Job,
@@ -460,6 +461,11 @@ class MainWindow(QMainWindow):
 
         for panel in (self._live, self._report, self._sweep, self._monte, self._compare):
             panel.retranslate()
+        # The per-panel ``retranslate`` methods cover what each panel remembers
+        # to cover; the generic walk covers the rest (row captions, tool-tips,
+        # What's-This notes), so a switch reaches every string on screen and not
+        # only the ones somebody listed (S-26).
+        retranslate_tree(self)
         self._retranslate_chrome()
         self._tabs.setCurrentIndex(current_tab)
 

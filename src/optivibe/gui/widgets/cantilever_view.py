@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from optivibe.core.types import FloatArray, TipState
+from optivibe.gui.i18n import tr
 from optivibe.mechanics import first_mode_shape
 
 __all__ = ["CantileverView"]
@@ -49,8 +50,8 @@ class CantileverView(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._plot = pg.PlotWidget()
-        self._plot.setLabel("bottom", "position along fiber z", units="mm")
-        self._plot.setLabel("left", "lateral deflection (exaggerated)", units="mm")
+        self._plot.setLabel("bottom", tr("cantilever.axis.z"), units="mm")
+        self._plot.setLabel("left", tr("cantilever.axis.deflection"), units="mm")
         self._plot.showGrid(x=True, y=True, alpha=0.3)
         self._plot.addLine(x=0.0, pen=pg.mkPen("#888", width=4))  # clamp wall
         self._beam = self._plot.plot([], [], pen=pg.mkPen("#1f77b4", width=3))
@@ -58,7 +59,7 @@ class CantileverView(QWidget):
         self._tip = pg.ScatterPlotItem(size=9, brush=pg.mkBrush("#d62728"))
         self._plot.addItem(self._tip)
 
-        self._play_button = QPushButton("Pause")
+        self._play_button = QPushButton(tr("live.pause"))
         self._play_button.setCheckable(True)
         self._play_button.setChecked(True)
         self._play_button.clicked.connect(self._on_play_toggled)
@@ -67,11 +68,12 @@ class CantileverView(QWidget):
         self._speed.setMinimum(1)
         self._speed.setMaximum(20)
         self._speed.setValue(4)
-        self._readout = QLabel("tip: -")
+        self._readout = QLabel(tr("cantilever.tip.empty"))
 
         controls = QHBoxLayout()
         controls.addWidget(self._play_button)
-        controls.addWidget(QLabel("speed"))
+        self._speed_label = QLabel(tr("live.speed.label"))
+        controls.addWidget(self._speed_label)
         controls.addWidget(self._speed, stretch=1)
         controls.addWidget(self._readout)
 
@@ -126,7 +128,7 @@ class CantileverView(QWidget):
         self._plot.setYRange(-1.4 * span, 1.4 * span)
         self._frame = 0
         self._play_button.setChecked(True)
-        self._play_button.setText("Pause")
+        self._play_button.setText(tr("live.pause"))
         self._timer.start()
         self._draw_frame(0)
 
@@ -136,15 +138,15 @@ class CantileverView(QWidget):
         self._beam.setData([], [])
         self._axis.setData([], [])
         self._tip.setData([], [])
-        self._readout.setText("tip: -")
+        self._readout.setText(tr("cantilever.tip.empty"))
 
     def _on_play_toggled(self, playing: bool) -> None:
         """Play/pause handler for the toggle button."""
         if playing and self._dx.size:
-            self._play_button.setText("Pause")
+            self._play_button.setText(tr("live.pause"))
             self._timer.start()
         else:
-            self._play_button.setText("Play")
+            self._play_button.setText(tr("live.play"))
             self._timer.stop()
 
     def _tick(self) -> None:
@@ -171,6 +173,21 @@ class CantileverView(QWidget):
         self._axis.setData(seg_z, seg_y)
         theta_urad = float(self._theta[index]) * 1.0e6
         self._readout.setText(
-            f"tip dx = {dx * 1e9:+.2f} nm, theta_y = {theta_urad:+.2f} urad  "
-            f"(x{self._exaggeration:.0f} exaggerated)"
+            tr(
+                "cantilever.tip.readout",
+                dx=dx * 1e9,
+                theta=theta_urad,
+                k=self._exaggeration,
+            )
         )
+
+    def retranslate(self) -> None:
+        """Re-label the controls and axes after a language switch."""
+        self._plot.setLabel("bottom", tr("cantilever.axis.z"), units="mm")
+        self._plot.setLabel("left", tr("cantilever.axis.deflection"), units="mm")
+        self._speed_label.setText(tr("live.speed.label"))
+        self._play_button.setText(
+            tr("live.pause") if self._play_button.isChecked() else tr("live.play")
+        )
+        if not self._dx.size:
+            self._readout.setText(tr("cantilever.tip.empty"))

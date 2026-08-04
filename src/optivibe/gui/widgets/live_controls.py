@@ -116,7 +116,7 @@ class LiveControls(QWidget):
         row.addWidget(self._source)
         row.addWidget(self._browse)
         row.addWidget(self._rate_label)
-        row.addWidget(with_help(self._rate, t("Update rate"), tr("live.stream.rate.help")))
+        row.addWidget(with_help(self._rate, "Update rate", "live.stream.rate.help"))
         row.addWidget(self._speed)
         row.addWidget(self._loop)
         row.addStretch(1)

@@ -18,6 +18,9 @@ structure and leaves CI/packaging untouched (13 SW-65).
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+
 from PySide6.QtCore import QObject, Signal
 
 __all__ = [
@@ -26,9 +29,13 @@ __all__ = [
     "available_languages",
     "current_language",
     "language_bus",
+    "record_translation_misses",
+    "resolve",
+    "retranslate_text",
     "set_language",
     "t",
     "tr",
+    "translate_optional",
 ]
 
 #: Supported language codes (English first: the default and the test baseline).
@@ -97,6 +104,37 @@ def _en_index() -> dict[str, str]:
     return _EN_INDEX
 
 
+#: Active miss recorder, or ``None`` when nobody is listening (the normal case).
+_MISSES: list[str] | None = None
+
+
+@contextmanager
+def record_translation_misses() -> Iterator[list[str]]:
+    """Collect every lookup that does **not** resolve through :data:`CATALOG`.
+
+    The reason this hook exists at all: :func:`t` uses the English source as its
+    msgid, so a string added to the code without its catalog entry does not
+    raise, does not fail typing and does not fail a test -- it silently keeps
+    its English text in a Russian session (13, ``SW-76``). The failure is
+    therefore invisible from the outside and has to be observed *at the lookup*.
+
+    Yields
+    ------
+    list of str
+        Accumulates ``"t: <source>"`` / ``"tr: <key>"`` records, appended as the
+        misses happen. Recording is not re-entrant and not thread-safe: it is a
+        test instrument (``tests/test_gui_i18n_guard.py``), not a runtime path.
+    """
+    global _MISSES
+    previous: list[str] | None = _MISSES
+    misses: list[str] = []
+    _MISSES = misses
+    try:
+        yield misses
+    finally:
+        _MISSES = previous
+
+
 def t(text: str, /, **fmt: object) -> str:
     """Translate by English source string (msgid = the English text itself).
 
@@ -118,6 +156,8 @@ def t(text: str, /, **fmt: object) -> str:
     str
         The localized (and, if ``fmt`` given, formatted) string.
     """
+    if _MISSES is not None and text.strip() and text not in _en_index():
+        _MISSES.append(f"t: {text}")
     out = _en_index().get(text, text) if _current == "ru" else text
     return out.format(**fmt) if fmt else out
 
@@ -142,10 +182,96 @@ def tr(key: str, /, **fmt: object) -> str:
         The localized string.
     """
     entry = CATALOG.get(key)
+    if _MISSES is not None and (entry is None or not entry.get(_current)):
+        _MISSES.append(f"tr: {key}")
     if entry is None:
         return key
     text = entry.get(_current) or entry.get("en") or key
     return text.format(**fmt) if fmt else text
+
+
+def resolve(text: str, /) -> str:
+    """Translate a string that may be *either* a catalog key or an English msgid.
+
+    The two lookup styles grew side by side (:func:`tr` by key for new strings,
+    :func:`t` by English source for the hundreds of pre-i18n call sites), and
+    the shared help helpers receive both kinds. Resolving here -- rather than
+    letting call sites pre-translate and pass the *result* on -- keeps the
+    argument a msgid, which is what :func:`record_translation_misses` can check:
+    a pre-translated argument is by construction absent from the catalog and
+    would either hide a real gap or raise a false one (13, ``SW-78``).
+
+    Parameters
+    ----------
+    text : str
+        A catalog key, or the English source string.
+
+    Returns
+    -------
+    str
+        The localized string (the input itself if neither lookup resolves).
+    """
+    return tr(text) if text in CATALOG else t(text)
+
+
+def translate_optional(text: str, /) -> str:
+    r"""Look a string up *without* treating a miss as a defect.
+
+    For text that is not authored as a msgid: the matplotlib labels of the
+    Qt-free ``viz`` layer mix static captions with data-bearing ones
+    (``"L = 2.00 mm -> 25.00 kHz"``) and pure maths (``"$\\eta$"``), so a miss
+    there is normal and must not reach the miss recorder -- otherwise the
+    recorder drowns in noise and stops being a guard. Widget text must use
+    :func:`t`/:func:`tr`/:func:`resolve` instead.
+    """
+    return _en_index().get(text, text) if _current == "ru" else text
+
+
+_ANY_INDEX: dict[str, str] | None = None
+
+
+def _any_index() -> dict[str, str]:
+    """Build (once) the *reverse* index: any locale's text -> its catalog key.
+
+    Lets a already-rendered string be re-rendered in another language without
+    the widget remembering which msgid produced it. Uniqueness is a real
+    requirement (two keys sharing a Russian value would make the mapping
+    ambiguous) and is pinned by ``tests/test_gui_i18n_guard.py``.
+    """
+    global _ANY_INDEX
+    if _ANY_INDEX is None:
+        index: dict[str, str] = {}
+        for key, entry in CATALOG.items():
+            for lang in LANGUAGES:
+                index.setdefault(entry[lang], key)
+        _ANY_INDEX = index
+    return _ANY_INDEX
+
+
+def retranslate_text(text: str, /) -> str:
+    r"""Re-render an already-localized string in the active language.
+
+    Widgets are built with :func:`t`/:func:`tr` and then keep the *result*; on
+    a language switch the msgid that produced it is long gone. Rather than make
+    every widget remember its msgid -- bookkeeping that the ``SW-76`` class
+    shows nobody keeps up -- the rendered text is looked back up through
+    :func:`_any_index`. Text the catalog does not know (values, paths, numbers,
+    config tokens) is returned unchanged.
+
+    Composed help notes (``"<title>\n\n<body>"`` from
+    :func:`~optivibe.gui.widgets.ui_helpers.with_help`) are split on their first
+    blank line and translated part by part, because the composition itself is
+    never a msgid.
+    """
+    if not text.strip():
+        return text
+    key = _any_index().get(text)
+    if key is not None:
+        return tr(key)
+    head, sep, tail = text.partition("\n\n")
+    if sep:
+        return retranslate_text(head) + sep + retranslate_text(tail)
+    return text
 
 
 def _e(en: str, ru: str) -> dict[str, str]:
@@ -978,7 +1104,7 @@ CATALOG: dict[str, dict[str, str]] = {
         "Во что разрешается пустое поле Q: модель затухания Q(L) при текущей "
         "длине консоли и флаге вакуума (M-02)",
     ),
-    "system.ringdown.row": _e("ring-down", "ring-down"),
+    "system.ringdown.row": _e("ring-down", "затухание"),
     "system.ringdown.button": _e("Load ring-down (Q)...", "Загрузить ring-down (Q)..."),
     "system.ringdown.button.tip": _e(
         "Load a free-decay artifact (M-18); the log-decrement Q seeds the "
@@ -1096,7 +1222,7 @@ CATALOG: dict[str, dict[str, str]] = {
         "каждый прогон при тех же настройках бит-воспроизводим. Снято: каждый "
         "прогон берёт свежий шум (чтобы оценить разброс между прогонами).",
     ),
-    "repro.seed.label": _e("Seed", "Seed"),
+    "repro.seed.label": _e("Seed", "Сид"),
     "repro.seed.help": _e(
         "The seed value used when 'fixed seed' is checked. Any integer; keep it "
         "constant to reproduce a run exactly, change it to draw a different "
@@ -1374,7 +1500,7 @@ CATALOG: dict[str, dict[str, str]] = {
     "exc.row.component": _e("component", "компонента"),
     "exc.row.axis": _e("axis", "ось"),
     "exc.row.axis_inherit": _e("inherit", "как у композита"),
-    "exc.row.seed": _e("seed", "seed"),
+    "exc.row.seed": _e("seed", "сид"),
     "exc.row.own_seed": _e("own seed", "свой seed"),
     "exc.row.fs_from_file": _e("fs [Hz] (0=file)", "fs [Гц] (0=из файла)"),
     "exc.row.add_component": _e("+ component", "+ компонента"),
@@ -1926,5 +2052,129 @@ CATALOG: dict[str, dict[str, str]] = {
     "physics.notes.html": _e(
         _PHYSICS_NOTES_EN,
         _PHYSICS_NOTES_RU,
+    ),
+    # ------------------------------------------------------- S-26: gaps the
+    # whole-tree guard found (13, ``SW-78``). Grouped by the surface they sit
+    # on; every one of them reached a Russian session in English before.
+    # -- What's-This titles of the per-subsystem preset rows (composed msgids).
+    "subsystem.source.preset.title": _e("Source: preset", "Источник: пресет"),
+    "subsystem.fiber.preset.title": _e("Fiber line: preset", "Волоконная линия: пресет"),
+    "subsystem.cantilever.preset.title": _e("Cantilever: preset", "Консоль: пресет"),
+    "subsystem.reflector.preset.title": _e("Reflector: preset", "Отражатель: пресет"),
+    "subsystem.detector.preset.title": _e("Detector: preset", "Детектор: пресет"),
+    # -- Reflector rows that are not built from a _FieldSpec.
+    # -- Physics-layer stage rows (What's-This titles).
+    "stage.optics.title": _e("Optics stage", "Стадия оптики"),
+    "stage.mechanics.title": _e("Mechanics stage", "Стадия механики"),
+    "stage.detector.title": _e("Detector stage", "Стадия детектора"),
+    "stage.dsp.title": _e("DSP stage", "Стадия ЦОС"),
+    # -- System tab.
+    "system.q_override.title": _e("Q total override", "Q полное: переопределение"),
+    # -- Measured-data loaders (What's-This titles, S-13 entry points).
+    "source.spectrum.load.title": _e("Load measured spectrum", "Загрузить измеренный спектр"),
+    "source.rin.load.title": _e("Load RIN trace", "Загрузить трассу RIN"),
+    "reflector.profile.load.title": _e("Load tip profile", "Загрузить профиль наконечника"),
+    "system.ringdown.load.title": _e("Load ring-down", "Загрузить кривую затухания"),
+    # -- File-dialog captions of the same loaders.
+    "artifact.filter": _e(
+        "Characterization artifact (*.yaml *.yml *.csv)",
+        "Артефакт характеризации (*.yaml *.yml *.csv)",
+    ),
+    "artifact.pick.spectrum": _e(
+        "Load spectrum artifact (sidecar YAML or CSV)",
+        "Загрузить артефакт спектра (YAML-спутник или CSV)",
+    ),
+    "artifact.pick.rin": _e(
+        "Load RIN trace artifact (sidecar YAML or CSV)",
+        "Загрузить артефакт трассы RIN (YAML-спутник или CSV)",
+    ),
+    "artifact.pick.profile": _e(
+        "Load tip-profile artifact (sidecar YAML or CSV)",
+        "Загрузить артефакт профиля наконечника (YAML-спутник или CSV)",
+    ),
+    "artifact.pick.ringdown": _e(
+        "Load ring-down artifact (sidecar YAML or CSV)",
+        "Загрузить артефакт затухания (YAML-спутник или CSV)",
+    ),
+    #: The loader failure note. The embedded ``{exc}`` stays English on
+    #: purpose: it is the core exception text (a log/diagnostic surface), not a
+    #: UI string, and localizing exception messages would move user-facing text
+    #: into the Qt-free core, which 09 §9 keeps language-agnostic.
+    "artifact.load_failed": _e("load failed: {exc}", "загрузка не удалась: {exc}"),
+    # -- Live overlay control.
+    "live.expected.label": _e("expected peaks", "ожидаемые пики"),
+    "live.expected.tip": _e(
+        "Overlay the peaks the twin predicts: resonance f1 (+ f1/Q band) and drive harmonics",
+        "Наложить пики, предсказанные двойником: резонанс f1 (и полоса f1/Q) "
+        "и гармоники воздействия",
+    ),
+    "live.pause": _e("Pause", "Пауза"),
+    "live.play": _e("Play", "Пуск"),
+    "stage.optics.physical": _e("physical (reflector)", "физическая (отражатель)"),
+    "system.save.caption": _e("Save composition", "Сохранить композицию"),
+    "system.load.caption": _e("Load composition", "Загрузить композицию"),
+    "system.yaml.filter": _e("YAML (*.yaml)", "YAML (*.yaml)"),
+    "exc.tdms.group.placeholder": _e("(first group)", "(первая группа)"),
+    "exc.mat.key.placeholder": _e("variable name", "имя переменной"),
+    # -- Tooltips that were plain literals before S-26.
+    # -- pyqtgraph axis captions. ``a``/``v`` are the symbols of 01 §2 and stay
+    # identical in both locales; ``frequency``/``time`` are words and do not.
+    "plot.axis.a": _e("a", "a"),
+    "plot.axis.v": _e("v", "v"),
+    "plot.axis.frequency": _e("frequency", "частота"),
+    "plot.axis.time": _e("time", "время"),
+    "dialog.select_file": _e("Select file", "Выбрать файл"),
+    "cantilever.axis.z": _e("position along fiber z", "положение вдоль волокна z"),
+    "cantilever.axis.deflection": _e(
+        "lateral deflection (exaggerated)", "боковой прогиб (утрирован)"
+    ),
+    "cantilever.tip.empty": _e("tip: -", "наконечник: -"),
+    "cantilever.tip.readout": _e(
+        "tip dx = {dx:+.2f} nm, theta_y = {theta:+.2f} urad  (x{k:.0f} exaggerated)",
+        "наконечник dx = {dx:+.2f} нм, theta_y = {theta:+.2f} мкрад  (x{k:.0f}, утрировано)",
+    ),
+    "live.speed.label": _e("speed", "темп"),
+    # -- What's-This titles of the excitation pages (composed as "<kind> excitation").
+    "exc.about.sine.title": _e("sine excitation", "возбуждение sine"),
+    "exc.about.multitone.title": _e("multitone excitation", "возбуждение multitone"),
+    "exc.about.sweep.title": _e("sweep excitation", "возбуждение sweep"),
+    "exc.about.random.title": _e("random excitation", "возбуждение random"),
+    "exc.about.shock.title": _e("shock excitation", "возбуждение shock"),
+    "exc.about.composite.title": _e("composite excitation", "возбуждение composite"),
+    "exc.about.csv.title": _e("csv excitation", "возбуждение csv"),
+    "exc.about.wav.title": _e("wav excitation", "возбуждение wav"),
+    "exc.about.tdms.title": _e("tdms excitation", "возбуждение tdms"),
+    "exc.about.uff.title": _e("uff excitation", "возбуждение uff"),
+    "exc.about.mat.title": _e("mat excitation", "возбуждение mat"),
+    "exc.about.hdf5.title": _e("hdf5 excitation", "возбуждение hdf5"),
+    # -- Mirrored DSP rows on the Physics-layers tab.
+    "stage.sensitivity.mirror.help": _e(
+        "Mirror of the same control on the DSP experiment tab (one value, two "
+        "places). How the standard DSP obtains the scalar sensitivity s_target: "
+        "'static' -- the design-point derivative; 'operating_point' -- "
+        "re-evaluated at the resolved working point (bias, gap); "
+        "'nonlinear_curve' -- inverted through the full eta(x) curve (handles "
+        "large drive amplitudes).",
+        "Зеркало того же элемента на вкладке «Эксперимент ЦОС» (одно значение, "
+        "два места). Как стандартный ЦОС получает скалярную чувствительность "
+        "s_target: «static» — производная в проектной точке; "
+        "«operating_point» — пересчёт в разрешённой рабочей точке (bias, "
+        "зазор); «nonlinear_curve» — инверсия по полной кривой eta(x) "
+        "(держит большие амплитуды воздействия).",
+    ),
+    "stage.integrator.mirror.help": _e(
+        "Mirror of the same control on the DSP experiment tab (one value, two "
+        "places). Acceleration -> velocity/displacement integration: "
+        "'frequency' -- division by (i omega) in the spectrum (fast, exact for "
+        "stationary signals); 'time' -- time-domain integration with "
+        "detrending (better for transients/shocks); 'leaky' -- the causal "
+        "scheme of the live mode over a whole record (for comparing what "
+        "causality costs).",
+        "Зеркало того же элемента на вкладке «Эксперимент ЦОС» (одно значение, "
+        "два места). Интегрирование a -> v -> x: «frequency» — деление на "
+        "(i omega) в спектре (быстро, точно для стационарных сигналов); "
+        "«time» — интегрирование во времени с удалением тренда (лучше для "
+        "переходных процессов и ударов); «leaky» — причинная схема живого "
+        "режима по всей записи (чтобы сравнить, чего стоит причинность).",
     ),
 }

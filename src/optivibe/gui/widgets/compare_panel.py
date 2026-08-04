@@ -148,7 +148,7 @@ class ComparePanel(QWidget):
         body.setStretchFactor(0, 1)
         body.setStretchFactor(1, 3)
 
-        self._header = tab_header(t("Compare DSP chains"), tr("compare.tab.help"))
+        self._header = tab_header("Compare DSP chains", "compare.tab.help")
         layout = QVBoxLayout(self)
         layout.addWidget(self._header)
         layout.addLayout(controls)

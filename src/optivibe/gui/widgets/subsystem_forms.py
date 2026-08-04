@@ -72,7 +72,7 @@ _REFLECTOR_SHAPES = ("cylinder", "sphere", "plane", "wedge")
 
 #: File-dialog filter of the S-13 measured-data loaders: either the sidecar
 #: YAML or the CSV next to it identifies the artifact (doc 16 §2a).
-_ARTIFACT_FILTER = "Characterization artifact (*.yaml *.yml *.csv)"
+_ARTIFACT_FILTER_KEY = "artifact.filter"
 
 # Per-subsystem editable override fields, as
 # (key, label, unit, tooltip, help). Floats are entered in SI via a line edit
@@ -408,8 +408,10 @@ class _SubsystemForm(QGroupBox):
             edit = _line()
             edit.setToolTip(t(tip))
             self._edits[key] = edit
+            # The row caption is composed (translated stem + SI unit), so it can
+            # never be a msgid itself: the help title takes the *stem* msgid.
             row = f"{t(label)} [{unit}]"
-            self._form.addRow(row, with_help(edit, row, help_text))
+            self._form.addRow(row, with_help(edit, label, help_text))
 
     def _reload_presets(self) -> None:
         """Refresh the preset list (user presets may have appeared)."""
@@ -474,7 +476,7 @@ class _SubsystemForm(QGroupBox):
 
     def _pick_artifact(self, caption: str) -> Path | None:  # pragma: no cover - dialog
         """Open the shared characterization-artifact file dialog."""
-        path, _ = QFileDialog.getOpenFileName(self, caption, "", _ARTIFACT_FILTER)
+        path, _ = QFileDialog.getOpenFileName(self, caption, "", tr(_ARTIFACT_FILTER_KEY))
         return Path(path) if path else None
 
 
@@ -501,48 +503,37 @@ class _SourceForm(_SubsystemForm):
         super().__init__("Source", "source", _SOURCE_FIELDS, store)
         self._lineshape = QComboBox()
         self._lineshape.addItems(_LINESHAPES)
-        self._lineshape.setToolTip(
-            "Source spectrum shape (M-10): default keeps the R-46 behaviour "
-            "(Gaussian visibility, rectangular RIN floor); measured needs a "
-            "loaded spectrum artifact (M-15/S-13)"
-        )
+        self._lineshape.setToolTip(tr("source.lineshape.tip"))
         self._spectrum_lam: list[float] | None = None
         self._spectrum_psd: list[float] | None = None
         self._spectrum_note = QLabel(t("no measured spectrum loaded"))
         self._spectrum_note.setWordWrap(True)
         self._spectrum_button = QPushButton(t("Load measured spectrum..."))
-        self._spectrum_button.setToolTip(
-            "Load a characterization artifact (sidecar YAML or its CSV; doc 16 "
-            "§2a) and enable lineshape = measured"
-        )
+        self._spectrum_button.setToolTip(tr("source.spectrum.button.tip"))
         self._spectrum_button.clicked.connect(self._on_load_spectrum)
         self._rin_note = QLabel("")
         self._rin_note.setWordWrap(True)
         self._rin_button = QPushButton(t("Load RIN trace..."))
-        self._rin_button.setToolTip(
-            "Load a floor-corrected RIN(f) artifact (M-16); the band median "
-            "seeds the RIN field as an explicit value (replaces the derived "
-            "floor, R-57(v))"
-        )
+        self._rin_button.setToolTip(tr("source.rin_trace.button.tip"))
         self._rin_button.clicked.connect(self._on_load_rin)
 
         self._form.insertRow(
-            1, "lineshape", with_help(self._lineshape, "lineshape", _LINESHAPE_HELP)
+            1, t("lineshape"), with_help(self._lineshape, "lineshape", _LINESHAPE_HELP)
         )
         self._form.insertRow(
             2,
-            "spectrum",
+            t("spectrum"),
             with_help(
                 self._loader_row(self._spectrum_button, self._spectrum_note),
-                "Load measured spectrum",
+                "source.spectrum.load.title",
                 _SPECTRUM_LOAD_HELP,
             ),
         )
         self._form.addRow(
-            "RIN trace",
+            t("RIN trace"),
             with_help(
                 self._loader_row(self._rin_button, self._rin_note),
-                "Load RIN trace",
+                "source.rin.load.title",
                 _RIN_LOAD_HELP,
             ),
         )
@@ -583,13 +574,13 @@ class _SourceForm(_SubsystemForm):
 
     def _on_load_spectrum(self) -> None:  # pragma: no cover - file dialog
         """Pick a spectrum characterization artifact and load it."""
-        path = self._pick_artifact("Load spectrum artifact (sidecar YAML or CSV)")
+        path = self._pick_artifact(tr("artifact.pick.spectrum"))
         if path is not None:
             try:
                 self.load_spectrum_artifact(path)
             except (FileNotFoundError, ValueError) as exc:
                 logger.debug("spectrum artifact load failed: %s", exc)
-                self._spectrum_note.setText(f"load failed: {exc}")
+                self._spectrum_note.setText(tr("artifact.load_failed", exc=exc))
 
     def load_spectrum_artifact(self, path: Path) -> None:
         """Load a ``kind = "spectrum"`` characterization artifact into the form.
@@ -654,13 +645,13 @@ class _SourceForm(_SubsystemForm):
     # ------------------------------------------------------------------ #
     def _on_load_rin(self) -> None:  # pragma: no cover - file dialog
         """Pick a RIN-trace characterization artifact and load it."""
-        path = self._pick_artifact("Load RIN trace artifact (sidecar YAML or CSV)")
+        path = self._pick_artifact(tr("artifact.pick.rin"))
         if path is not None:
             try:
                 self.load_rin_artifact(path)
             except (FileNotFoundError, ValueError) as exc:
                 logger.debug("RIN artifact load failed: %s", exc)
-                self._rin_note.setText(f"load failed: {exc}")
+                self._rin_note.setText(tr("artifact.load_failed", exc=exc))
 
     def load_rin_artifact(self, path: Path) -> None:
         """Load a ``kind = "rin_psd"`` artifact and seed the RIN field.
@@ -752,25 +743,25 @@ class _ReflectorForm(_SubsystemForm):
         super().__init__("Reflector", "reflector", _REFLECTOR_FIELDS, store)
         self._shape = QComboBox()
         self._shape.addItems(_REFLECTOR_SHAPES)
-        self._shape.setToolTip("Reflector profile (S9-B); shapes gate their parameters")
+        self._shape.setToolTip(tr("reflector.shape.tip"))
         self._rc = _line()
-        self._rc.setToolTip("Radius of curvature R_c (cylinder/sphere; doc 08 §6)")
+        self._rc.setToolTip(tr("reflector.rc.tip"))
         self._alpha = _line()
-        self._alpha.setToolTip("Wedge face-tilt angle alpha_w (wedge only; doc 03 §c)")
+        self._alpha.setToolTip(tr("reflector.wedge.tip"))
         self._profile_note = QLabel("")
         self._profile_note.setWordWrap(True)
         self._profile_button = QPushButton(t("Load tip profile (R_c)..."))
-        self._profile_button.setToolTip(
-            "Load a tip-contour artifact (M-17); the circle fit seeds R_c"
-        )
+        self._profile_button.setToolTip(tr("reflector.profile.button.tip"))
         self._profile_button.clicked.connect(self._on_load_profile)
 
         self._form.insertRow(1, t("shape"), with_help(self._shape, "shape", _SHAPE_HELP))
         self._form.insertRow(
-            2, "curvature R_c [m]", with_help(self._rc, "curvature R_c [m]", _RC_HELP)
+            2, tr("reflector.rc.label"), with_help(self._rc, "reflector.rc.label", _RC_HELP)
         )
         self._form.insertRow(
-            3, "wedge angle [rad]", with_help(self._alpha, "wedge angle [rad]", _WEDGE_HELP)
+            3,
+            tr("reflector.wedge.label"),
+            with_help(self._alpha, "reflector.wedge.label", _WEDGE_HELP),
         )
         profile_row = QHBoxLayout()
         profile_row.setContentsMargins(0, 0, 0, 0)
@@ -778,7 +769,9 @@ class _ReflectorForm(_SubsystemForm):
         profile_row.addWidget(self._profile_note, stretch=1)
         holder = QWidget()
         holder.setLayout(profile_row)
-        self._form.addRow(t("profile"), with_help(holder, "Load tip profile", _PROFILE_LOAD_HELP))
+        self._form.addRow(
+            t("profile"), with_help(holder, "reflector.profile.load.title", _PROFILE_LOAD_HELP)
+        )
 
         self._shape.currentTextChanged.connect(self._on_shape_changed)
         self._on_shape_changed(self._shape.currentText())
@@ -792,13 +785,13 @@ class _ReflectorForm(_SubsystemForm):
 
     def _on_load_profile(self) -> None:  # pragma: no cover - file dialog
         """Pick a profile characterization artifact and load it."""
-        path = self._pick_artifact("Load tip-profile artifact (sidecar YAML or CSV)")
+        path = self._pick_artifact(tr("artifact.pick.profile"))
         if path is not None:
             try:
                 self.load_profile_artifact(path)
             except (FileNotFoundError, ValueError) as exc:
                 logger.debug("profile artifact load failed: %s", exc)
-                self._profile_note.setText(f"load failed: {exc}")
+                self._profile_note.setText(tr("artifact.load_failed", exc=exc))
 
     def load_profile_artifact(self, path: Path) -> None:
         """Load a ``kind = "profile"`` artifact and seed the curvature field.
@@ -978,23 +971,13 @@ class SystemBuilderPanel(QTabWidget):
         self._route.addItems(("2", "1"))
         self._eta_bias = _line("0.25")
         self._q_total = _line()  # empty = computed by the Q(L) model (R-48)
-        self._q_total.setToolTip(
-            "Total quality factor of mode 1. Since M-02 this is a COMPUTED "
-            "quantity (Q(L) damping model, R-47/R-48): leave blank to use the "
-            "model value shown below; a typed value is an explicit override"
-        )
+        self._q_total.setToolTip(tr("system.q_total.tip"))
         self._q_model = QLabel(t("Q(L) model: -"))
-        self._q_model.setToolTip(
-            "What a blank Q field resolves to: the Q(L) damping model at the "
-            "current cantilever length and vacuum flag (M-02)"
-        )
+        self._q_model.setToolTip(tr("system.q_model.tip"))
         self._q_note = QLabel("")
         self._q_note.setWordWrap(True)
         self._ringdown_button = QPushButton(t("Load ring-down (Q)..."))
-        self._ringdown_button.setToolTip(
-            "Load a free-decay artifact (M-18); the log-decrement Q seeds the "
-            "override field (measured Q wins over the Q(L) model)"
-        )
+        self._ringdown_button.setToolTip(tr("system.ringdown.button.tip"))
         self._ringdown_button.clicked.connect(self._on_load_ringdown)
         self._target_nea = _line("10.0")
         self._vacuum = QCheckBox(t("vacuum"))
@@ -1012,7 +995,7 @@ class SystemBuilderPanel(QTabWidget):
         self._reference_arm = QComboBox()
         self._reference_arm.addItems(("matched", "bright"))
         self._detector._form.addRow(
-            "balanced",
+            t("balanced"),
             with_help(
                 self._balanced,
                 "balanced",
@@ -1023,7 +1006,7 @@ class SystemBuilderPanel(QTabWidget):
             ),
         )
         self._detector._form.addRow(
-            "reference arm",
+            t("reference arm"),
             with_help(
                 self._reference_arm,
                 "reference arm",
@@ -1038,7 +1021,7 @@ class SystemBuilderPanel(QTabWidget):
         self._adc_bits.setRange(1, 32)
         self._adc_bits.setValue(24)
         self._detector._form.addRow(
-            "ADC bits",
+            t("ADC bits"),
             with_help(
                 self._adc_bits,
                 "ADC bits",
@@ -1084,7 +1067,7 @@ class SystemBuilderPanel(QTabWidget):
         group = QGroupBox(t("System / composition"))
         form = QFormLayout(group)
         form.addRow(
-            "starting composition",
+            t("starting composition"),
             with_help(self._starting, "starting composition", _STARTING_HELP),
         )
         form.addRow(t("name"), with_help(self._name, "name", _NAME_HELP))
@@ -1097,6 +1080,8 @@ class SystemBuilderPanel(QTabWidget):
             with_help(self._line_freq, "line freq [Hz]", _LINE_FREQ_HELP),
         )
         band_row = QHBoxLayout()
+        # ``f_min``/``f_max`` are the symbols of 01 §2, identical in both
+        # locales by design (see the guard's exemption list).
         band_row.addWidget(QLabel("f_min"))
         band_row.addWidget(self._f_min)
         band_row.addWidget(QLabel("f_max"))
@@ -1105,15 +1090,16 @@ class SystemBuilderPanel(QTabWidget):
         holder.setLayout(band_row)
         form.addRow(t("band [Hz]"), with_help(holder, "band [Hz]", _BAND_HELP))
         form.addRow(
-            "full scale [g]", with_help(self._full_scale, "full scale [g]", _FULL_SCALE_HELP)
+            t("full scale [g]"),
+            with_help(self._full_scale, "full scale [g]", _FULL_SCALE_HELP),
         )
         form.addRow(t("route"), with_help(self._route, "route", _ROUTE_HELP))
         form.addRow(
             t("eta_bias (stub)"), with_help(self._eta_bias, "eta_bias (stub)", _ETA_BIAS_HELP)
         )
         form.addRow(
-            "Q total override (blank = Q(L) model)",
-            with_help(self._q_total, "Q total override", _Q_HELP),
+            t("Q total override (blank = Q(L) model)"),
+            with_help(self._q_total, "system.q_override.title", _Q_HELP),
         )
         form.addRow(t(""), self._q_model)
         ringdown_row = QHBoxLayout()
@@ -1122,9 +1108,11 @@ class SystemBuilderPanel(QTabWidget):
         ringdown_row.addWidget(self._q_note, stretch=1)
         rd_holder = QWidget()
         rd_holder.setLayout(ringdown_row)
-        form.addRow(t("ring-down"), with_help(rd_holder, "Load ring-down", _RINGDOWN_LOAD_HELP))
         form.addRow(
-            "target NEA [ug/rtHz]",
+            t("ring-down"), with_help(rd_holder, "system.ringdown.load.title", _RINGDOWN_LOAD_HELP)
+        )
+        form.addRow(
+            t("target NEA [ug/rtHz]"),
             with_help(self._target_nea, "target NEA [ug/rtHz]", _TARGET_NEA_HELP),
         )
         form.addRow(with_help(self._vacuum, "vacuum", _VACUUM_HELP))
@@ -1149,14 +1137,14 @@ class SystemBuilderPanel(QTabWidget):
     def _on_load_ringdown(self) -> None:  # pragma: no cover - file dialog
         """Pick a ring-down characterization artifact and load it."""
         path, _ = QFileDialog.getOpenFileName(
-            self, "Load ring-down artifact (sidecar YAML or CSV)", "", _ARTIFACT_FILTER
+            self, tr("artifact.pick.ringdown"), "", tr(_ARTIFACT_FILTER_KEY)
         )
         if path:
             try:
                 self.load_ringdown_artifact(Path(path))
             except (FileNotFoundError, ValueError) as exc:
                 logger.debug("ring-down artifact load failed: %s", exc)
-                self._q_note.setText(f"load failed: {exc}")
+                self._q_note.setText(tr("artifact.load_failed", exc=exc))
 
     def load_ringdown_artifact(self, path: Path) -> None:
         """Load a ``kind = "ringdown"`` artifact and seed the Q override.
@@ -1270,7 +1258,7 @@ class SystemBuilderPanel(QTabWidget):
         """Save the current composition under ``configs/user/systems``."""
         default = self._config_dir / "user" / "systems" / f"{self._name.text().strip()}.yaml"
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save composition", str(default), "YAML (*.yaml)"
+            self, tr("system.save.caption"), str(default), tr("system.yaml.filter")
         )
         if not path:
             return
@@ -1282,7 +1270,9 @@ class SystemBuilderPanel(QTabWidget):
 
     def _on_load(self) -> None:  # pragma: no cover - file dialog
         """Load a saved composition and populate the forms."""
-        path, _ = QFileDialog.getOpenFileName(self, "Load composition", "", "YAML (*.yaml)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, tr("system.load.caption"), "", tr("system.yaml.filter")
+        )
         if not path:
             return
         try:

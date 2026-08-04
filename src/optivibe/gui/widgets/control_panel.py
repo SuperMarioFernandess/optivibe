@@ -52,7 +52,7 @@ from PySide6.QtWidgets import (
 )
 
 from optivibe.core.config.models import DspOptions
-from optivibe.gui.i18n import t
+from optivibe.gui.i18n import t, tr
 from optivibe.gui.widgets.dsp_controls import DspControls
 from optivibe.gui.widgets.excitation_builder import ExcitationBuilder
 from optivibe.gui.widgets.subsystem_forms import SystemBuilderPanel
@@ -83,21 +83,6 @@ _DSP_HELP = (
     "detector-current -> acceleration chain with spectra and metrics; 'stub' "
     "-- a scale-only shortcut for plumbing checks. The sensitivity and "
     "integrator selectors below apply to the standard DSP only."
-)
-_SENSITIVITY_HELP = (
-    "Mirror of the same control on the DSP experiment tab (one value, two "
-    "places). How the standard DSP obtains the scalar sensitivity s_target: 'static' "
-    "-- the design-point derivative; 'operating_point' -- re-evaluated at the "
-    "resolved working point (bias, gap); 'nonlinear_curve' -- inverted "
-    "through the full eta(x) curve (handles large drive amplitudes)."
-)
-_INTEGRATOR_HELP = (
-    "Mirror of the same control on the DSP experiment tab (one value, two "
-    "places). Acceleration -> velocity/displacement integration: 'frequency' -- "
-    "division by (i omega) in the spectrum (fast, exact for stationary "
-    "signals); 'time' -- time-domain integration with detrending (better for "
-    "transients/shocks); 'leaky' -- the causal scheme of the live mode over a "
-    "whole record (for comparing what causality costs)."
 )
 _SEED_ENABLED_HELP = (
     "Fix the random seed of the noise and random-excitation generators. "
@@ -134,7 +119,9 @@ class ControlPanel(QWidget):
         # The optics key stays "cylinder" (registry/ICD key -> the shape-
         # dispatching ReflectorOptics); only its label is friendlier (the shape
         # itself is chosen in the Reflector form).
-        self._optics = self._labeled_combo((("physical (reflector)", "cylinder"), ("stub", "stub")))
+        self._optics = self._labeled_combo(
+            ((tr("stage.optics.physical"), "cylinder"), ("stub", "stub"))
+        )
         self._mechanics = self._combo(("modal", "modal_time", "stub"))
         self._detector = self._combo(("photodiode", "stub"))
         self._dsp = self._combo(("standard", "stub"))
@@ -204,9 +191,13 @@ class ControlPanel(QWidget):
         form.addRow(t("Detector"), with_help(self._detector, "Detector stage", _DETECTOR_HELP))
         form.addRow(t("DSP"), with_help(self._dsp, "DSP stage", _DSP_HELP))
         form.addRow(
-            "Sensitivity", with_help(self._sensitivity, "Sensitivity model", _SENSITIVITY_HELP)
+            t("Sensitivity"),
+            with_help(self._sensitivity, "Sensitivity model", "stage.sensitivity.mirror.help"),
         )
-        form.addRow(t("Integrator"), with_help(self._integrator, "Integrator", _INTEGRATOR_HELP))
+        form.addRow(
+            t("Integrator"),
+            with_help(self._integrator, "Integrator", "stage.integrator.mirror.help"),
+        )
         layout.addWidget(group)
         layout.addStretch(1)
         return page

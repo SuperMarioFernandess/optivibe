@@ -150,7 +150,7 @@ class DspControls(QWidget):
         for field, title, help_key in _ROWS:
             label = QLabel(self._row_label(title, field))
             self._labels[field] = label
-            form.addRow(label, with_help(self._widgets[field], t(title), tr(help_key)))
+            form.addRow(label, with_help(self._widgets[field], title, help_key))
 
         badge_row = QHBoxLayout()
         badge_row.addWidget(self._status, 1)

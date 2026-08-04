@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from optivibe.gui.i18n import t
+from optivibe.gui.i18n import t, tr
 from optivibe.gui.widgets.ui_helpers import with_help
 
 __all__ = ["ExcitationBuilder"]
@@ -1316,7 +1316,7 @@ class ExcitationBuilder(QWidget):
         tdms_browse = QPushButton(t("Browse..."))
         tdms_browse.clicked.connect(lambda: self._browse(self._tdms_path, "TDMS (*.tdms)"))
         self._tdms_group = QLineEdit()
-        self._tdms_group.setPlaceholderText("(first group)")
+        self._tdms_group.setPlaceholderText(tr("exc.tdms.group.placeholder"))
         self._tdms_channel = QSpinBox()
         self._tdms_channel.setRange(0, 256)
         self._tdms_fs = _spin(0.0, 2.0e6, 0.0, decimals=1, step=100.0)
@@ -1367,7 +1367,7 @@ class ExcitationBuilder(QWidget):
         mat_browse = QPushButton(t("Browse..."))
         mat_browse.clicked.connect(lambda: self._browse(self._mat_path, "MAT (*.mat)"))
         self._mat_key = QLineEdit()
-        self._mat_key.setPlaceholderText("variable name")
+        self._mat_key.setPlaceholderText(tr("exc.mat.key.placeholder"))
         self._mat_column = QSpinBox()
         self._mat_column.setRange(0, 256)
         self._mat_fs = _spin(0.1, 2.0e6, 5000.0, decimals=1, step=100.0)
@@ -1434,14 +1434,14 @@ class ExcitationBuilder(QWidget):
             summary, text = _ABOUT[about]
             note = QLabel(t(summary))
             note.setStyleSheet("color: #808080; font-style: italic;")
-            form.addRow(t("about"), with_help(note, f"{about} excitation", text))
+            form.addRow(t("about"), with_help(note, f"exc.about.{about}.title", text))
         for label, widget in rows:
             form.addRow(t(label), widget)
         return page
 
     def _browse(self, target: QLineEdit, file_filter: str) -> None:  # pragma: no cover - dialog
         """Open a file dialog and write the chosen path into ``target``."""
-        path, _ = QFileDialog.getOpenFileName(self, "Select file", "", file_filter)
+        path, _ = QFileDialog.getOpenFileName(self, tr("dialog.select_file"), "", file_filter)
         if path:
             target.setText(path)
 

@@ -14,7 +14,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolb
 from matplotlib.figure import Figure
 from PySide6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
-from optivibe.gui.i18n import current_language, t
+from optivibe.gui.i18n import current_language, t, translate_optional
 
 __all__ = ["MplFigureView", "translate_figure"]
 
@@ -24,25 +24,28 @@ def translate_figure(figure: Figure) -> Figure:
 
     ``viz/`` is Qt-free and language-agnostic (SW-09): it always emits English
     labels. Rather than teach the core about languages, the GUI post-translates
-    the figure here via the same English-msgid catalog (:func:`t`) -- a no-op in
-    English. Pure-LaTeX/maths labels and data-bearing (formatted) titles are not
-    in the catalog and pass through unchanged.
+    the figure here via the same English-msgid catalog -- a no-op in English.
+    Pure-LaTeX/maths labels and data-bearing (formatted) titles are not in the
+    catalog and pass through unchanged, which is why the lookup is the
+    non-recording :func:`~optivibe.gui.i18n.translate_optional`: here a miss is
+    normal by construction, unlike a widget string, where it is the ``SW-76``
+    defect (13, ``SW-78``).
     """
     if current_language() == "en":
         return figure
     for ax in figure.get_axes():
-        ax.set_xlabel(t(ax.get_xlabel()))
-        ax.set_ylabel(t(ax.get_ylabel()))
+        ax.set_xlabel(translate_optional(ax.get_xlabel()))
+        ax.set_ylabel(translate_optional(ax.get_ylabel()))
         title = ax.get_title()
         if title:
-            ax.set_title(t(title))
+            ax.set_title(translate_optional(title))
         legend = ax.get_legend()
         if legend is not None:
             for entry in legend.get_texts():
-                entry.set_text(t(entry.get_text()))
+                entry.set_text(translate_optional(entry.get_text()))
     suptitle = getattr(figure, "_suptitle", None)
     if suptitle is not None:
-        suptitle.set_text(t(suptitle.get_text()))
+        suptitle.set_text(translate_optional(suptitle.get_text()))
     return figure
 
 
