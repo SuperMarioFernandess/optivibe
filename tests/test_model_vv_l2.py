@@ -9,7 +9,7 @@ plan 19 §L3, experiment E1) that the bench must reproduce qualitatively.
 Check IDs (plan 19 §2/§3): V19-L2-04 (NEA ~ f_max^2 master law), V19-L2-05
 (sphere R_c -> inf reproduces the plane), V19-L2-06 (cylinder curved plane ==
 sphere plane; cylinder flat plane == plane model), V19-L2-07 (d eta/d dz
-three-term decomposition, revised doc 04 §4), V19-L3-01 (2f response at
+three-term decomposition, doc 04 §4 with the R-59 width term), V19-L3-01 (2f response at
 bias ~ 0), V19-L3-02 (single-ended floor is RIN-limited), V19-L3-03 (pedestal
 multiplier 1 + R1/(rho eta0) ~ 5 for the bare prototype, doc 05 R-20).
 """
@@ -109,16 +109,18 @@ def test_golden_cylinder_planes_match_sphere_and_plane(variant_a: VariantConfig)
 
 @pytest.mark.golden
 def test_golden_dz_slope_three_term_decomposition(variant_a: VariantConfig) -> None:
-    """V19-L2-07: d eta/d dz = eta0 * (flat + curved + map) (revised doc 04 §4).
+    """V19-L2-07: d eta/d dz = eta0 * (flat + curved + width) (doc 03 §e, R-41 + R-59).
 
-    The dz channel of the cylinder collects three independent log-derivative
-    contributions at the working point (T-19 revision of the doc 04 §4
-    reference; doc 19 §4): the flat-plane envelope ``-A/(zR^2 + A^2)``, the
-    curved-plane ABCD envelope ``d ln eta_par^x/d g`` and the gap dependence of
-    the offset map ``-8 Dx0^2 A/(R_c^2 w0^2)``. The full central-difference
-    derivative of eta must equal eta0 times their sum (product/factorization
-    rule), and the total must match the documented ~ -7.9e3 1/m of the revised
-    doc 04 §4 (was: illustrative -2e4, not reproduced by any derivation).
+    The dz channel of the cylinder collects three log-derivative contributions at
+    the working point (structure R-41; doc 04 §4): the flat-plane envelope
+    ``-A/(zR^2 + A^2)``, the curved-plane ABCD envelope ``d ln eta_par^x/d g`` and
+    -- since R-59 -- the gap dependence of the *width* ``sigma_eff`` at fixed
+    ``Delta_eff``: ``-Dx0^2 d(sigma_eff^-2)/dg = +8 Dx0^2 zR^2 (R_c + A) /
+    (w0^2 [(R_c + A)^2 + zR^2]^2)`` (it replaces the revoked map term
+    ``-8 Dx0^2 A/(R_c^2 w0^2)``). The full central-difference derivative must equal
+    eta0 times their sum, and the terms must match doc 03 §e at 1550 nm,
+    R_c = 62.5, A = 31, Dx0 = 2 um: -1.578e4 (curved), -7.82e3 (flat),
+    +2.41e3 (width) 1/m, eta0 = 0.3755, total -7.958e3 1/m (doc 03 §d'').
     """
     m = CylinderOpticsModel.from_config(variant_a)
     gap, radius, bias = m.gap_m, m.radius_of_curvature_m, m.bias_m
@@ -129,11 +131,16 @@ def test_golden_dz_slope_three_term_decomposition(variant_a: VariantConfig) -> N
     term_flat = -gap / (z_r**2 + gap**2)
     epc = lambda g: float(eta_parallel_curved(m.beam, g, radius))  # noqa: E731
     term_curved = (np.log(epc(gap + h)) - np.log(epc(gap - h))) / (2.0 * h)
-    term_map = -8.0 * bias**2 * gap / (radius**2 * w0**2)
-    assert slope_full == pytest.approx(eta0 * (term_flat + term_curved + term_map), rel=1.0e-6)
-    assert slope_full == pytest.approx(-7.9e3, rel=0.05)  # revised doc 04 §4 reference
-    # The doc's old closed form (flat envelope only) is just one of three terms:
-    assert abs(eta0 * term_flat) < 0.3 * abs(slope_full)
+    lever = radius + gap
+    term_width = 8.0 * bias**2 * z_r**2 * lever / (w0**2 * (lever**2 + z_r**2) ** 2)
+    assert slope_full == pytest.approx(eta0 * (term_flat + term_curved + term_width), rel=1.0e-6)
+    assert eta0 == pytest.approx(0.3755, abs=5.0e-5)
+    assert term_curved == pytest.approx(-1.578e4, rel=1.0e-3)
+    assert term_flat == pytest.approx(-7.82e3, rel=1.0e-3)
+    assert term_width == pytest.approx(2.41e3, rel=2.0e-3)
+    assert slope_full == pytest.approx(-7.958e3, rel=1.0e-3)
+    # The old single-term closed form (flat envelope only) is ~37 % of the total:
+    assert abs(eta0 * term_flat) < 0.5 * abs(slope_full)
 
 
 @pytest.mark.golden

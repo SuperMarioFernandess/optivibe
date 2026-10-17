@@ -1,15 +1,20 @@
-"""S3 optics tests: golden references (docs 03/04/05/08), limits (11 §7),
+"""S3 optics tests: golden references (docs 03/04/05), limits (11 §7),
 integration with the modal mechanics, and property invariants (10 §10).
 
-Calibration anchor (journal 2026-06-12): w0 = 5.2 um, Delta x0 = 2 um,
-R_c = 62.5 um and the S3-calibrated gap A = 31 um put eta0, eta_peak, the bare
-slope (doc 04 §4) and the effective slope (docs 05 §1 / 08) within 5 % of the
-documented references simultaneously.
+Golden references follow R-59 (doc 03 v1.6, S-30): the returned beam of a convex
+mirror is mismatched to the fiber mode, and the full overlap gives an exact
+Gaussian in ``dx_eff`` with ``sigma_eff = (w0/2) sqrt(1 + ((R_c + A)/zR)^2)``.
+Every reference is a closed formula of doc 03 §d/§e evaluated *in the test*
+(:func:`_closed_forms`) or a value tabulated in doc 03 §d'' -- never the model
+output (plan 18 §5(g)). The pre-R-59 references (eta0 ~ 0.25, slope ~ -1.5e5 1/m,
+"normalized slope ~ 1/R_c", bias 2.573 um) belonged to the revoked matched-beam
+multiplier.
 """
 
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -49,8 +54,31 @@ def model_a(config_dir: Path) -> CylinderOpticsModel:
 
 @pytest.fixture(scope="module")
 def model_b(config_dir: Path) -> CylinderOpticsModel:
-    """Scaled platform: R_c = 31 um, scale-equivalent bias 0.992 um."""
+    """Variant B platform: R_c = 31 um, configured bias 0.992 um.
+
+    The 0.992 um bias was chosen as "scale-equivalent" (sigma ~ R_c); R-59 voids
+    that premise (eta0/eta_peak = 0.938 at this bias, doc 03 §d''). The config is
+    unchanged here -- its revision is backlog M-25.
+    """
     return CylinderOpticsModel.from_config(load_variant("B", config_dir=config_dir))
+
+
+def _closed_forms(model: CylinderOpticsModel) -> tuple[float, float]:
+    """``(eta_peak, sigma_eff)`` from the closed forms of doc 03 §d (R-59).
+
+    ``eta_peak = eta_par^x eta_par^y`` with
+    ``eta_par^x = R_c zR / sqrt((A^2 + zR^2)((R_c + A)^2 + zR^2))``,
+    ``eta_par^y = 1/sqrt(1 + (A/zR)^2)`` and
+    ``sigma_eff = (w0/2) sqrt(1 + ((R_c + A)/zR)^2)``. Only the model's *inputs*
+    (lambda, w0, A, R_c) are read; nothing is taken from its outputs.
+    """
+    w0 = model.beam.waist_radius_m
+    z_r = math.pi * w0**2 / model.beam.wavelength_m
+    gap, radius = model.gap_m, model.radius_of_curvature_m
+    eta_par_x = radius * z_r / math.sqrt((gap**2 + z_r**2) * ((radius + gap) ** 2 + z_r**2))
+    eta_par_y = 1.0 / math.sqrt(1.0 + (gap / z_r) ** 2)
+    sigma_eff = 0.5 * w0 * math.sqrt(1.0 + ((radius + gap) / z_r) ** 2)
+    return eta_par_x * eta_par_y, sigma_eff
 
 
 def _sine_excitation(
@@ -84,27 +112,42 @@ def _thd(signal: FloatArray, fs: float, fundamental_hz: float, n_harmonics: int 
 # --------------------------------------------------------------------------- #
 @pytest.mark.golden
 def test_golden_working_point_platform_a(model_a: CylinderOpticsModel) -> None:
-    """eta0 ~ 0.25 and eta_peak ~ 0.42 at the documented platform (docs 03/08)."""
-    assert model_a.eta_working_point() == pytest.approx(0.25, rel=5.0e-2)
-    assert model_a.eta_peak() == pytest.approx(0.42, rel=5.0e-2)
+    """eta_peak and eta0 of variant A against doc 03 §d / §d'' (R-59).
+
+    ``eta0 = eta_peak exp(-(Delta x0/sigma_eff)^2)``: 0.4369 and 0.3755 at the
+    documented platform (doc 03 §d''; was 0.2396 with the revoked multiplier).
+    """
+    peak, sigma = _closed_forms(model_a)
+    eta0 = peak * math.exp(-((model_a.bias_m / sigma) ** 2))
+    assert model_a.eta_peak() == pytest.approx(peak, rel=1.0e-12)
+    assert model_a.eta_working_point() == pytest.approx(eta0, rel=1.0e-12)
+    assert model_a.eta_peak() == pytest.approx(0.4369, abs=5.0e-5)
+    assert model_a.eta_working_point() == pytest.approx(0.3755, abs=5.0e-5)
 
 
 @pytest.mark.golden
 def test_golden_bare_slope_platform_a(model_a: CylinderOpticsModel) -> None:
-    """Bare slope d eta / d dx ~ -1.5e5 1/m at the working point (doc 04 §4)."""
-    assert model_a.slope_dx() == pytest.approx(-1.5e5, rel=5.0e-2)
+    """Bare slope ``-2 eta0 Delta x0 / sigma_eff^2 = -5.683e4 1/m`` (docs 03 §e/§d'', 04 §4)."""
+    peak, sigma = _closed_forms(model_a)
+    bias = model_a.bias_m
+    expected = -2.0 * peak * math.exp(-((bias / sigma) ** 2)) * bias / sigma**2
+    assert model_a.slope_dx() == pytest.approx(expected, rel=1.0e-10)
+    assert model_a.slope_dx() == pytest.approx(-5.683e4, rel=1.0e-4)
 
 
 @pytest.mark.golden
 def test_golden_effective_slope_platform_a(model_a: CylinderOpticsModel) -> None:
-    """Effective slope ~ -1.6e5 1/m at L=1.4 mm and ~ -1.56e5 at 3 mm (doc 05 §1).
+    """Effective slope with the tilt multiplier ``1 + 1.377 (R_c + A)/L`` (doc 03 §d'').
 
-    The doc 05/08 reference -0.16 1/um is the *effective* slope including the
-    tilt multiplier [1 + 1.377 (R_c + A)/L] at L = 1.4 mm (S3 reinterpretation,
-    journal 2026-06-12); the bare value stays at the doc 04 §4 reference.
+    Platform A: -5.829e4 1/m at its own L = 5 mm, and the doc 03 §d'' values at
+    other lengths, -6.205e4 (1.4 mm) and -5.926e4 1/m (3 mm). Before R-59 the
+    references were -1.6e5 / -1.56e5 1/m (doc 05 §1 "-0.16 1/um", revoked).
     """
-    assert model_a.effective_slope_dx(1.4e-3, COUPLING) == pytest.approx(-1.6e5, rel=5.0e-2)
-    assert model_a.effective_slope_dx(3.0e-3, COUPLING) == pytest.approx(-1.56e5, rel=5.0e-2)
+    for length, reference in ((5.0e-3, -5.829e4), (1.4e-3, -6.205e4), (3.0e-3, -5.926e4)):
+        multiplier = 1.0 + COUPLING * (model_a.radius_of_curvature_m + model_a.gap_m) / length
+        slope = model_a.effective_slope_dx(length, COUPLING)
+        assert slope == pytest.approx(model_a.slope_dx() * multiplier, rel=1.0e-12)
+        assert slope == pytest.approx(reference, rel=1.0e-4)
 
 
 @pytest.mark.golden
@@ -116,28 +159,60 @@ def test_golden_tilt_multiplier(model_a: CylinderOpticsModel) -> None:
 
 @pytest.mark.golden
 def test_golden_slope_scaling_with_radius(model_a: CylinderOpticsModel) -> None:
-    """First-order slope scaling ~ 1/R_c reproduces the -0.32 1/um reference.
+    """At a fixed eta0/eta_peak the slope peaks at ``R_c* = sqrt(A^2 + zR^2)`` (R-59).
 
-    Doc 08 §2: halving R_c (62.5 -> 31 um) doubles the slope to ~ -0.32 1/um at
-    L = 1.4 mm. The reference is the first-order scaling of the effective
-    -0.16 1/um; the *normalized* slope (1/eta0) d eta/d dx of the exact model
-    scales exactly as 1/R_c at a scale-equivalent bias (Delta x0 ~ R_c), while
-    the absolute exact-model slope grows only x1.31 because eta_peak(R_c)
-    drops — a recorded knowledge-base discrepancy (journal 2026-06-12).
+    Doc 03 §e (R-59): at a fixed working-point ratio (rule R-40) the absolute
+    slope is proportional to ``eta_par^x / sigma_eff ~ R_c / ((R_c + A)^2 + zR^2)``.
+    Halving R_c (62.5 -> 31 um) therefore *lowers* it x0.851, and the optimum is
+    ``R_c* ~ 63 um`` at A = 31 um. Revoked: the first-order "~1/R_c" scaling of
+    R-42 behind the former -0.32 1/um reference and the x1.31 gain.
     """
-    scaled = model_a.effective_slope_dx(1.4e-3, COUPLING) * (62.5 / 31.0)
-    assert scaled == pytest.approx(-3.2e5, rel=5.0e-2)
+    w0 = model_a.beam.waist_radius_m
+    z_r = math.pi * w0**2 / model_a.beam.wavelength_m
+    gap = model_a.gap_m
+
+    def slope_at_rule(radius: float) -> float:
+        untuned = replace(model_a, radius_of_curvature_m=radius, bias_m=0.0)
+        tuned = replace(untuned, bias_m=untuned.bias_for_eta_ratio(0.37))
+        return abs(tuned.slope_dx())
+
+    def law(radius: float) -> float:
+        return radius / ((radius + gap) ** 2 + z_r**2)
+
+    ratio = slope_at_rule(31.0e-6) / slope_at_rule(62.5e-6)
+    assert ratio == pytest.approx(law(31.0e-6) / law(62.5e-6), rel=1.0e-10)
+    assert ratio == pytest.approx(0.851, abs=5.0e-4)
+    r_star = math.sqrt(gap**2 + z_r**2)
+    assert r_star == pytest.approx(63.0e-6, abs=0.5e-6)
+    best = slope_at_rule(r_star)
+    assert best > slope_at_rule(0.8 * r_star)
+    assert best > slope_at_rule(1.25 * r_star)
 
 
 @pytest.mark.golden
-def test_golden_normalized_slope_scales_inverse_radius(
+def test_golden_normalized_slope_ratio_is_sigma_ratio(
     model_a: CylinderOpticsModel, model_b: CylinderOpticsModel
 ) -> None:
-    """(1/eta0) d eta/d dx scales exactly as 1/R_c at scale-equivalent bias."""
-    ratio = (model_b.slope_dx() / model_b.eta_working_point()) / (
+    """At equal ``t = Delta x0/sigma_eff`` the normalized slope scales as ``1/sigma_eff`` (R-59).
+
+    ``(1/eta0) d eta/d dx = -2 t / sigma_eff``. R-42 claimed it scales *exactly*
+    as 1/R_c at the "scale-equivalent" bias ``Delta x0 ~ R_c`` (sigma ~ R_c);
+    R-59 revokes that: sigma_eff is not proportional to R_c, and the ratio for
+    R_c 31 vs 62.5 um is ``sigma_eff(62.5)/sigma_eff(31) = 1.3097`` (not 2.016).
+    The bias of the R_c = 31 um platform with the same eta0/eta_peak as the A
+    config is 1.5271 um, not 0.992 um (doc 03 §d'').
+    """
+    t = model_a.bias_m / model_a.sigma_m
+    same_t = replace(model_b, bias_m=t * model_b.sigma_m)
+    ratio = (same_t.slope_dx() / same_t.eta_working_point()) / (
         model_a.slope_dx() / model_a.eta_working_point()
     )
-    assert ratio == pytest.approx(62.5 / 31.0, rel=1.0e-6)
+    _, sigma_a = _closed_forms(model_a)
+    _, sigma_b = _closed_forms(model_b)
+    assert ratio == pytest.approx(sigma_a / sigma_b, rel=1.0e-9)
+    assert ratio == pytest.approx(1.3097, abs=5.0e-5)
+    assert same_t.bias_m == pytest.approx(1.5271e-6, abs=5.0e-11)
+    assert abs(ratio - 62.5 / 31.0) > 0.5  # the revoked R-42 statement
 
 
 @pytest.mark.golden
@@ -164,18 +239,17 @@ def test_golden_cross_axis_residual_quadratic(model_a: CylinderOpticsModel) -> N
 
 @pytest.mark.golden
 def test_golden_dz_slope_sign_and_magnitude(model_a: CylinderOpticsModel) -> None:
-    """d eta / d dz < 0 with |.| ~ 1e3..2.4e4 1/m; the dz channel is negligible.
+    """d eta / d dz = -7.958e3 1/m (doc 03 §d''/§e, R-41 + R-59); the dz channel is negligible.
 
-    The exact model gives ~ -7.9e3 1/m; the doc 04 §4 illustrative -2e4 1/m is
-    not reproduced (and contradicts doc 04's own closed form ~ -1.9e3) — a
-    recorded knowledge-base discrepancy (journal 2026-06-12). The negligibility
-    conclusion is robust across the window: at 50 g the dz contribution to
-    Delta eta stays < 1e-4 of the dx contribution.
+    The three-term structure (R-41) is pinned by V19-L2-07 in
+    ``test_model_vv_l2.py``; here the total derivative and the channel ratio:
+    at 50 g on variant A (L = 5 mm) the dz contribution to Delta eta is
+    ``2.2e-5`` of the target one (doc 04 §4, R-59 rider) -- negligible.
     """
     h = 1.0e-10
     slope_z = float(((model_a.eta(dz=h) - model_a.eta(dz=-h)) / (2.0 * h)).item())
     assert slope_z < 0.0
-    assert 1.0e3 <= abs(slope_z) <= 2.4e4
+    assert slope_z == pytest.approx(-7.958e3, rel=1.0e-3)
     # Channel comparison at 50 g on variant A geometry (L = 5 mm):
     constants = load_constants(Path(__file__).resolve().parent.parent / "configs/constants.yaml")
     variant = load_variant("A")
@@ -184,12 +258,17 @@ def test_golden_dz_slope_sign_and_magnitude(model_a: CylinderOpticsModel) -> Non
     dx_amp = mech.h_lat_qs * accel
     dz_amp = mech.axial_compliance * accel
     ratio = abs(slope_z * dz_amp) / abs(model_a.slope_dx() * dx_amp)
-    assert ratio < 1.0e-4
+    assert ratio == pytest.approx(2.2e-5, abs=5.0e-7)
 
 
 @pytest.mark.golden
 def test_golden_anisotropy(model_a: CylinderOpticsModel, constants: Constants) -> None:
-    """Angular-map anisotropy L/(1.377 R_c) ~ 35x at L = 3 mm (doc 04 §5)."""
+    """Angular-map anisotropy L/(1.377 R_c) ~ 35x at L = 3 mm (doc 04 §6).
+
+    After R-59 this is the ratio of the angular *maps*, not of the sensitivities
+    (doc 03 §e, 04 §6 rider); the choice of tolerance metric is backlog M-25, so
+    the helper and this pin are unchanged.
+    """
     coupling = constants.tilt_displacement_coupling_per_l
     assert coupling == COUPLING
     assert model_a.anisotropy(3.0e-3, coupling) == pytest.approx(
@@ -207,17 +286,21 @@ def test_golden_numeric_matches_analytic_slope(model_a: CylinderOpticsModel) -> 
 
 
 @pytest.mark.golden
-def test_golden_bias_rule_helper(model_a: CylinderOpticsModel) -> None:
-    """bias_for_eta_ratio(0.37) puts eta0/eta_peak at 0.37 (doc 08 R-40/O-05)."""
-    bias = model_a.bias_for_eta_ratio(0.37)
-    tuned = CylinderOpticsModel(
-        beam=model_a.beam,
-        gap_m=model_a.gap_m,
-        radius_of_curvature_m=model_a.radius_of_curvature_m,
-        bias_m=bias,
-    )
-    assert tuned.eta_working_point() / tuned.eta_peak() == pytest.approx(0.37, rel=1.0e-9)
-    assert bias == pytest.approx(2.573e-6, rel=1.0e-3)
+def test_golden_bias_rule_helper(
+    model_a: CylinderOpticsModel, model_b: CylinderOpticsModel
+) -> None:
+    """bias_for_eta_ratio(0.37) = sigma_eff sqrt(-ln 0.37): 5.1267 / 3.9144 um (R-40, R-59).
+
+    The rule eta0 = 0.37 eta_peak (doc 08 R-40/O-05) holds in dimensionless form;
+    its absolute values follow sigma_eff (doc 03 §d''; were 2.5734 / 1.2764 um).
+    """
+    for model, reference in ((model_a, 5.1267e-6), (model_b, 3.9144e-6)):
+        bias = model.bias_for_eta_ratio(0.37)
+        _, sigma = _closed_forms(model)
+        assert bias == pytest.approx(sigma * math.sqrt(-math.log(0.37)), rel=1.0e-12)
+        assert bias == pytest.approx(reference, abs=5.0e-11)
+        tuned = replace(model, bias_m=bias)
+        assert tuned.eta_working_point() / tuned.eta_peak() == pytest.approx(0.37, rel=1.0e-9)
 
 
 # --------------------------------------------------------------------------- #
@@ -248,13 +331,16 @@ def test_limit_zero_gap(model_a: CylinderOpticsModel) -> None:
     """g -> 0: flat mirror re-couples perfectly; a convex mirror does not.
 
     Even at zero gap the convex mirror imprints curvature 2/R_c on the returned
-    wavefront, so the curved-plane overlap stays < 1; it tends to 1 only in the
-    additional limit R_c -> inf (doc 03 §3-§4).
+    wavefront, so the curved-plane overlap stays < 1: ``R_c / sqrt(R_c^2 + zR^2)``
+    = 0.752 at R_c = 62.5 um (doc 03 §d closed form at A = 0); it tends to 1 only
+    in the additional limit R_c -> inf (doc 03 §g).
     """
     beam = model_a.beam
     assert float(eta_parallel_flat(beam, 0.0).item()) == pytest.approx(1.0, abs=1.0e-12)
     curved_finite = float(eta_parallel_curved(beam, 0.0, 62.5e-6).item())
-    assert 0.0 < curved_finite < 1.0
+    z_r = math.pi * beam.waist_radius_m**2 / beam.wavelength_m
+    assert curved_finite == pytest.approx(62.5e-6 / math.hypot(62.5e-6, z_r), rel=1.0e-12)
+    assert curved_finite == pytest.approx(0.752, abs=5.0e-4)
     assert float(eta_parallel_curved(beam, 0.0, 1.0e3).item()) == pytest.approx(1.0, rel=1.0e-9)
 
 
@@ -335,11 +421,23 @@ def test_integration_small_signal_amplitude(
     assert measured == pytest.approx(expected, rel=5.0e-2)
 
 
-def test_integration_cross_axis_suppression(constants: Constants, config_dir: Path) -> None:
-    """A y tone is suppressed ~6 orders relative to the same tone on x (doc 04 §5).
+def test_integration_cross_axis_suppression(
+    constants: Constants, config_dir: Path, model_b: CylinderOpticsModel
+) -> None:
+    """y vs x response follows the closed-form suppression of doc 03 §e (R-59; V19-L2-10).
 
-    Measured at 10 g / 120 Hz on variant B: ratio ~ 7.4e5 (the quadratic
-    residual grows with amplitude, so the ratio is amplitude-dependent).
+    Variant B, 10 g / 120 Hz, tip amplitude ``d = |H_lat(f)| a``. Target axis:
+    first-order response ``|(d eta/d dx)_eff| d`` with
+    ``(d eta/d dx)_eff = -2 eta0 Delta x0/sigma_eff^2 [1 + 1.377 (R_c + A)/L]``.
+    Cross axis: first order is zero; only the flat-plane residual through
+    ``theta_x = 1.377 dy/L`` remains, ``eta0 (1 - exp[-(2 theta_x/theta0)^2])``
+    (angular width theta0/2, R-59).
+
+    The suppression level is a *reported model number*, not a requirement here:
+    ~1.04e5 after R-59 (was ~7.4e5 with the revoked multiplier; the former
+    threshold 5e5 was an empirical guard on that value). The level the
+    cross-axis suppression must reach is decided together with the anisotropy
+    metric (backlog M-25; owner decision of S-30, 2026-10-17).
     """
     variant = load_variant("B", config_dir=config_dir)
     mech = ModalFrequencyMechanics(constants=constants)
@@ -349,7 +447,22 @@ def test_integration_cross_axis_suppression(constants: Constants, config_dir: Pa
         excitation = _sine_excitation(120.0, 10.0, 20000.0, 1.0, constants.universal.g0_m_s2, axis)
         optical = stage.run(mech.run(excitation, variant), variant)
         responses[axis] = float(np.max(np.abs(optical.eta - optical.bias)))
-    assert responses["x"] / responses["y"] > 5.0e5
+
+    cantilever = CantileverModel.from_config(constants, variant)
+    tip = abs(complex(cantilever.h_lat(120.0)[0])) * 10.0 * constants.universal.g0_m_s2
+    coupling = constants.tilt_displacement_coupling_per_l
+    peak, sigma = _closed_forms(model_b)
+    bias, length = model_b.bias_m, variant.length_m
+    eta0 = peak * math.exp(-((bias / sigma) ** 2))
+    multiplier = 1.0 + coupling * (model_b.radius_of_curvature_m + model_b.gap_m) / length
+    slope_eff = -2.0 * eta0 * bias / sigma**2 * multiplier
+    theta0 = model_b.beam.wavelength_m / (math.pi * model_b.beam.waist_radius_m)
+    x_expected = abs(slope_eff) * tip
+    y_expected = eta0 * (1.0 - math.exp(-((2.0 * coupling * tip / (length * theta0)) ** 2)))
+    assert responses["x"] == pytest.approx(x_expected, rel=1.0e-2)
+    assert responses["y"] == pytest.approx(y_expected, rel=1.0e-2)
+    suppression = responses["x"] / responses["y"]
+    assert suppression == pytest.approx(x_expected / y_expected, rel=2.0e-2)
 
 
 def test_integration_cross_axis_residual_scales_quadratically(
@@ -371,10 +484,14 @@ def test_integration_cross_axis_residual_scales_quadratically(
 
 
 def test_integration_thd_grows_past_linearity_boundary(model_b: CylinderOpticsModel) -> None:
-    """THD of eta(dx sine) is < 1e-3 at 10 nm, > 2 % at 0.5 um, and monotone.
+    """THD of eta(dx sine) follows the closed-form HD2 and grows monotonically (03 §e, R-59).
 
-    Doc 03 §5: the small-signal boundary of the working point is w_tip ~ 0.5 um
-    (sigma ~ 1.28 um for the R_c = 31 um platform).
+    For the Gaussian ``eta(dx_eff)`` (R-59) a sine of amplitude d at the working
+    point ``t = Delta x0/sigma_eff`` gives ``HD2 = |4t^2 - 2| d / (8 t sigma_eff)``
+    (second-order Taylor, doc 03 §e). At the B config bias the working point sits
+    near the peak (eta0/eta_peak = 0.938, t = 0.253, sigma_eff = 3.93 um):
+    HD2 = 0.22 % at 10 nm, 2.2 % at 0.1 um and ~11 % at 0.5 um. Before R-59
+    (sigma = 1.28 um, revoked) the same drive gave < 0.1 % / ~2.5 %.
     """
     fs, freq, n_cycles = 51200.0, 100.0, 64
     t = np.arange(round(n_cycles * fs / freq)) / fs
@@ -394,7 +511,16 @@ def test_integration_thd_grows_past_linearity_boundary(model_b: CylinderOpticsMo
         return _thd(eta_x * eta_y, fs, freq)
 
     levels = [thd_at(a) for a in (10.0e-9, 0.1e-6, 0.5e-6)]
-    assert levels[0] < 1.0e-3
+    _, sigma = _closed_forms(model_b)
+    t = model_b.bias_m / sigma
+
+    def hd2(amplitude_m: float) -> float:
+        return abs(4.0 * t**2 - 2.0) * amplitude_m / (8.0 * t * sigma)
+
+    assert levels[0] == pytest.approx(hd2(10.0e-9), rel=1.0e-2)
+    assert levels[1] == pytest.approx(hd2(0.1e-6), rel=1.0e-2)
+    # Leading-order Taylor term; the next order is O((d/sigma)^2) ~ 2 % at 0.5 um.
+    assert levels[2] == pytest.approx(hd2(0.5e-6), rel=5.0e-2)
     assert levels[2] > 2.0e-2
     assert levels[0] < levels[1] < levels[2]
 
@@ -407,7 +533,10 @@ def test_golden_thd_matches_analytic_second_harmonic(model_b: CylinderOpticsMode
     second harmonic with amplitude ratio ``HD2 = |eta''| d / (4 |eta'|)`` (second
     order Taylor term ``eta'' x^2/2`` with ``sin^2 -> cos 2wt / 2``; doc 03 §5).
     The measured ratio from the simulated eta series agrees within 2 % at
-    ``d = 50 nm`` (well inside the ~0.5 um small-signal boundary).
+    ``d = 50 nm`` (well inside the ~0.5 um small-signal boundary). R-59: for the
+    exactly Gaussian ``eta(dx_eff)`` the Taylor ratio has the closed form
+    ``|4t^2 - 2| d / (8 t sigma_eff)``, 1.099 % here (was ~0.3 % with the revoked
+    multiplier) -- pinned below against the formula, not the model.
     """
     fs, freq, n_cycles = 51200.0, 100.0, 64
     amplitude_m = 50.0e-9
@@ -435,6 +564,11 @@ def test_golden_thd_matches_analytic_second_harmonic(model_b: CylinderOpticsMode
     curvature = (eta_at(step) - 2.0 * eta_at(0.0) + eta_at(-step)) / step**2
     hd2_analytic = abs(curvature) * amplitude_m / (4.0 * abs(slope))
     assert hd2_measured == pytest.approx(hd2_analytic, rel=0.02)
+    _, sigma = _closed_forms(model_b)
+    t = model_b.bias_m / sigma
+    hd2_closed = abs(4.0 * t**2 - 2.0) * amplitude_m / (8.0 * t * sigma)
+    assert hd2_analytic == pytest.approx(hd2_closed, rel=1.0e-3)
+    assert hd2_closed == pytest.approx(1.099e-2, abs=5.0e-6)
 
 
 # --------------------------------------------------------------------------- #
@@ -451,7 +585,7 @@ def test_scenario_cross_axis_runs(examples_dir: Path) -> None:
     eta = artifacts.forward.optical.eta
     assert np.all((eta >= 0.0) & (eta <= 1.0))
     residual = np.max(np.abs(eta - artifacts.forward.optical.bias))
-    assert residual < 1.0e-6  # quadratic cross residual, ~1.6e-9 expected
+    assert residual < 1.0e-6  # quadratic cross residual, ~2.1e-9 (R-59; was ~1.6e-9)
 
 
 def test_scenario_linearity_ramp_runs(examples_dir: Path) -> None:

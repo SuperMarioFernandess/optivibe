@@ -80,6 +80,26 @@ def dsp(constants: Constants) -> StandardDsp:
     return StandardDsp(constants=constants)
 
 
+# --------------------------------------------------------------------------- #
+# Base chain of the target sensitivity (doc 05 §2) on R-59 inputs.
+# --------------------------------------------------------------------------- #
+#: Effective slope (d eta/d dx)_eff of variant B at its L = 2.0 mm, 1/m (doc 03 §d'', R-59).
+SLOPE_EFF_B_DOC_03 = -3.574e4
+#: Working point eta0 of the R_c = 31 um platform at the configured bias (doc 03 §d'').
+ETA0_B_DOC_03 = 0.2663
+
+
+def _s_target_base(variant: VariantConfig, slope_eff: float = SLOPE_EFF_B_DOC_03) -> float:
+    """``s_target = R P rho (d eta/d dx)_eff H_QS`` on base inputs (doc 05 §2), A/(m/s^2).
+
+    ``H_QS = 0.0384 L^4 nm/g`` (L in mm; doc 02 §8, a 4-digit rounded coefficient,
+    ~5e-4 off the exact beam formula) and the effective slope of doc 03 §d''.
+    """
+    h_qs = 0.0384e-9 * (variant.length_m * 1.0e3) ** 4 / G0
+    gain = variant.responsivity_a_w * variant.source.power_w
+    return gain * variant.reflector.reflectivity * slope_eff * h_qs
+
+
 def _drive(f0: float, amp_g: float, axis: str = "x") -> Excitation:
     """Generate a single-tone excitation on the given axis."""
     spec = SineSpec(
@@ -110,8 +130,9 @@ def test_s_target_is_signed_negative(variant_b: VariantConfig, constants: Consta
     """s_target is negative for variant B (slope_eff < 0 carries through, doc 05)."""
     s = target_sensitivity(variant_b, constants)
     assert s < 0.0
-    # |s_target| x 50 g matches the ~95 uA datasheet note of B.yaml.
-    assert abs(s) * 50.0 * G0 == pytest.approx(95e-6, rel=0.1)
+    # |s_target| x 50 g = 17.2 uA from the base chain (doc 05 §2 on doc 03 §d'', R-59).
+    # The "~95 uA" note of B.yaml predates R-59 (the config comment is backlog M-25).
+    assert abs(s) * 50.0 * G0 == pytest.approx(abs(_s_target_base(variant_b)) * 50.0 * G0, rel=2e-3)
 
 
 @pytest.mark.golden
@@ -237,13 +258,36 @@ def test_dominant_multitone() -> None:
 # Golden: NEA referred to the input (doc 05 §7; O-SW-08).
 # --------------------------------------------------------------------------- #
 @pytest.mark.golden
-def test_nea_plateau_in_documented_window(variant_b: VariantConfig, constants: Constants) -> None:
-    """The plateau NEA of variant B sits in the documented ~25 ug/sqrt(Hz) window."""
+def test_nea_plateau_matches_base_chain(variant_b: VariantConfig, constants: Constants) -> None:
+    """Plateau NEA of B = sqrt(PSD)/|s_target| (+) NEA_th on base inputs (07 §1-§2, 17 §2; R-59).
+
+    The noise PSD is the L1-verified detector model at ``I_DC = R P (R1 + rho eta0)``
+    with eta0 = 0.2663 (doc 03 §d''); ``s_target`` is the doc 05 §2 chain with the
+    effective slope of doc 03 §d''; ``NEA_th`` is doc 07 §2. Variant B gives
+    ~175 ug/sqrt(Hz) after R-59. The former window 10-50 ug/sqrt(Hz) rested on the
+    doc 08 shelf and the SW-26 x1.57 factor (both pre-R-59); the shelves are
+    recomputed in backlog M-26 (owner decision of S-30, 2026-10-17).
+    """
+    from optivibe.detector.photodiode import noise_psd
+    from optivibe.mechanics.thermal import nea_thermal
+
     detector = _forward(_drive(200.0, 1.0), variant_b, "photodiode")
     summary = nea_from_detector(detector, variant_b, constants)
     assert summary is not None
-    nea_ug = summary.nea_plateau / G0 * 1e6
-    assert 10.0 <= nea_ug <= 50.0
+    gain = variant_b.responsivity_a_w * variant_b.source.power_w
+    i_dc = gain * (
+        variant_b.endface_reflectivity + variant_b.reflector.reflectivity * ETA0_B_DOC_03
+    )
+    psd = noise_psd(
+        i_dc,
+        variant_b,
+        constants,
+        balanced=variant_b.detector.balanced,
+        reference_arm=variant_b.detector.reference_arm,
+    )
+    optical = math.sqrt(psd["total"]) / abs(_s_target_base(variant_b))
+    thermal = nea_thermal(constants, variant_b.length_m, variant_b.q_total)
+    assert summary.nea_plateau == pytest.approx(math.hypot(optical, thermal), rel=3e-3)
 
 
 @pytest.mark.golden
@@ -306,8 +350,14 @@ def test_golden_nea_thermal_branch_quadrature(
 def test_golden_nea_spectrum_settles_on_thermal_floor_at_resonance(
     variant_b: VariantConfig, constants: Constants
 ) -> None:
-    """Near ``f1`` the optical NEA dips by ``~1/Q`` and the total settles onto
-    ``NEA_th`` -- the thermal floor caps the resonant dip (doc 07 §2.4/§3.1)."""
+    """Near ``f1`` the optical NEA dips by exactly ``1/Q`` and the total settles onto
+    ``NEA_th`` -- the thermal floor caps the resonant dip (doc 07 §2.4/§3.1).
+
+    ``|D(f1)| = Q`` (doc 02), so the optical branch at ``f1`` is the optical
+    plateau over Q; the total is its quadrature with the flat thermal floor.
+    After R-59 the optical branch at ``f1`` is ~0.12 NEA_th for B (was ~0.017;
+    the former empirical bound "< 0.1 NEA_th" is replaced by the identity).
+    """
     from optivibe.mechanics.cantilever import first_mode_hz
 
     detector = _forward(_drive(200.0, 1.0), variant_b, "photodiode")
@@ -316,8 +366,9 @@ def test_golden_nea_spectrum_settles_on_thermal_floor_at_resonance(
     at_res_no_th = nea_spectrum(detector, variant_b, f1, constants, include_thermal=False)
     summary = nea_from_detector(detector, variant_b, constants)
     assert summary is not None
-    # Optical branch dips by ~1/Q (Q ~ 2600 for B) -- far below the thermal floor.
-    assert at_res_no_th[0] < 0.1 * summary.nea_thermal
+    # Optical branch dips by exactly 1/Q (|D(f1)| = Q; Q ~ 2606 for B).
+    assert at_res_no_th[0] == pytest.approx(summary.nea_optical / variant_b.q_total, rel=1e-9)
+    assert at_res[0] == pytest.approx(math.hypot(at_res_no_th[0], summary.nea_thermal), rel=1e-12)
     # The total is pinned by the flat thermal floor (within 1 % here).
     assert at_res[0] == pytest.approx(summary.nea_thermal, rel=1e-2)
 

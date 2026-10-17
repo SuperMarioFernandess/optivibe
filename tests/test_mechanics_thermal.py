@@ -198,13 +198,17 @@ def test_golden_variant_d_target_is_the_thermal_floor(
 
 
 @pytest.mark.golden
-def test_golden_thermal_branch_share_matches_backlog_card(
-    constants: Constants, config_dir: Path
-) -> None:
-    """Doc 16 M-12: the branch moves B/C by < 0.2 % but is essential for A/D.
+def test_golden_thermal_branch_share_bounds(constants: Constants, config_dir: Path) -> None:
+    """Quadrature identity of the thermal branch; it moves B/C by < 0.2 % (doc 16 M-12).
 
-    Quadrature lift ``hypot(opt, th)/opt - 1``: < 0.2 % for the shot/RIN-limited
-    B and C; > 1 % for A and > 10 % for the thermally-targeted D.
+    Lift ``hypot(opt, th)/opt - 1`` per variant, with the point-level identity of
+    the doc 17 §2 chain. The upper bounds for the shot/RIN-limited B and C still
+    hold. The former lower bounds "> 1 % for A, > 10 % for D" came from the
+    pre-R-59 card (A +2.4 %, D +16.3 %) and are dropped: with the R-59 optics at
+    the configured biases the optical NEA grows (x3.2 A, x6.0 D) and the lifts
+    fall to ~0.2 % (A) and ~0.4 % (D) -- variant D is no longer thermally limited
+    in the model. Recorded for backlog M-26 / M-25 (owner decision of S-30,
+    2026-10-17); NEA_th itself (doc 07 §2) is unchanged.
     """
     from optivibe.analysis.variant_tools import analytic_point
 
@@ -220,5 +224,4 @@ def test_golden_thermal_branch_share_matches_backlog_card(
         )
     assert lifts["B"] < 2.0e-3
     assert lifts["C"] < 2.0e-3
-    assert lifts["A"] > 1.0e-2
-    assert lifts["D"] > 1.0e-1
+    assert all(lift >= 0.0 for lift in lifts.values())

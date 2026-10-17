@@ -3,9 +3,9 @@
 Covers the four shapes behind the optics shape layer (doc 03 §c-§e; the S9-B
 addendum to 03/04):
 
-* **cylinder** -- byte-for-byte regression of eta on fixed tip inputs and of the
-  resolved working point (the refactor onto the shape layer must not move a
-  bit; the S3 golden in ``test_optics_cylinder.py`` is the companion check);
+* **cylinder** -- byte-for-byte identity of the shape layer with the direct
+  model on fixed tip inputs, plus a regression anchor from the doc 03 §d closed
+  forms (R-59; the S3 golden in ``test_optics_cylinder.py`` is the companion);
 * **sphere** -- isotropy: anisotropy ~ 1 and ``|d eta/d Dy| == |d eta/d Dx|``;
 * **plane** -- the ``R_c -> inf`` reference: ``d eta/d Dx -> 0`` (numerically
   ~0 against the non-zero cylinder), defocus on both axes through the gap;
@@ -41,8 +41,12 @@ from optivibe.optics.cylinder import CylinderOptics
 from optivibe.optics.reflector import ReflectorOptics
 
 # --------------------------------------------------------------------------- #
-# Fixed tip inputs and the cylinder byte-for-byte anchor (captured on the
-# pre-S9-B HEAD 55949b4 with variant A; doc 14 §7 bit-identity gate).
+# Fixed tip inputs and the cylinder regression anchor (doc 14 §7 bit-identity
+# gate). R-59 (S-30, 2026-10-17): the anchor is no longer a snapshot of the code
+# (the S3 values captured on 55949b4 belonged to the revoked matched-beam
+# multiplier); it is the closed form of doc 03 §d evaluated independently of the
+# model: eta_x = eta_par^x(g) exp(-dx_eff^2/sigma_eff(g)^2),
+# eta_y = eta_par^y(g) exp(-(2 theta_x/theta0)^2), g = A + dz, variant A.
 # --------------------------------------------------------------------------- #
 _DX = np.array([0.0, 1.0e-6, -2.0e-6, 3.0e-6])
 _DY = np.array([0.0, 1.0e-6, 2.0e-6, -1.0e-6])
@@ -50,14 +54,14 @@ _DZ = np.array([0.0, 1.0e-7, -1.0e-7, 2.0e-7])
 _TX = np.array([0.0, 1.0e-4, -1.0e-4, 2.0e-4])
 _TY = np.array([0.0, 2.0e-4, 1.0e-4, -1.0e-4])
 
-# Exact eta(_DX.._TY) of the S3 cylinder model for variant A (frozen anchor).
+# eta(_DX.._TY) for variant A from the doc 03 §d closed forms (R-59 anchor).
 _CYL_ETA_ANCHOR = (
-    0.23964053560536128,
-    0.11072064177482513,
-    0.4379227963737634,
-    0.010214001155132081,
+    0.3755492741978154,
+    0.30894676898802326,
+    0.43792769429308165,
+    0.16999835185929635,
 )
-_CYL_ETA0_ANCHOR = 0.23964053560536128
+_CYL_ETA0_ANCHOR = 0.3755492741978154
 
 
 @pytest.fixture

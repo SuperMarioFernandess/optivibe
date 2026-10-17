@@ -1,21 +1,29 @@
-"""Gaussian-beam formulas of the optical subsystem (doc 03 §1-§4).
+"""Gaussian-beam formulas of the optical subsystem (doc 03 §a-§d).
 
 This module holds the *formulas* shared by reflector geometries: the beam
 descriptor (w0, zR, theta0), the round-trip ABCD propagation fiber -> gap ->
-convex mirror -> gap -> fiber, the mode-overlap (parallel) coupling factors and
-the Gaussian misalignment factor. Numbers (lambda, w0, A, R_c) come exclusively
-from the variant configuration (mirror of docs 03/08) — nothing is hard-coded
-here (SW-03, 10 §13).
+mirror -> gap -> fiber, the mode-overlap (parallel) coupling factors and the
+transverse/angular misalignment factor of the returned beam. Numbers (lambda,
+w0, A, R_c) come exclusively from the variant configuration (mirror of docs
+03/08) — nothing is hard-coded here (SW-03, 10 §13).
 
-Conventions (doc 03 §2)
------------------------
+Conventions (doc 03 §b-§d)
+--------------------------
 * The fiber mode is a Gaussian beam with waist w0 at the endface: q_in = i zR.
 * A convex mirror of curvature radius R_c acts as a diverging mirror with focal
-  length f = -R_c/2 (doc 03 §3).
+  length f = -R_c/2 (doc 03 §c); a flat mirror is the f -> inf limit, so its
+  round trip is free propagation over 2g: q_out = q_in + 2g.
 * Round trip over a gap ``g``: M = [[1 - g/f, 2g - g^2/f], [-1/f, 1 - g/f]].
-* Mode overlap of the returned beam with the fiber mode (doc 03 §4):
+* Mode overlap of the aligned returned beam with the fiber mode (doc 03 §d):
   ``eta_par = 2 sqrt(zR Im q_out) / | -i zR - q_out |``.
-* Transverse/angular misalignment factor: ``exp[-(d/w0)^2 - (alpha/theta0)^2]``.
+* Misalignment factor (doc 03 §d, R-59): the **full** overlap of the mode with
+  the returned beam of parameter ``q_out``, offset ``d`` and tilt ``alpha``,
+  ``exp[-(C_dd d^2 + C_da d alpha + C_aa alpha^2)]`` with the coefficients of
+  :func:`overlap_coefficients`. The returned beam of a convex mirror is
+  *mismatched* to the mode (``q_out != i zR``), and the cross term ``C_da``
+  (negative for a diverging return) almost cancels the angular one; the former
+  form ``exp[-(d/w0)^2 - (alpha/theta0)^2]`` is only the matched limit
+  ``q_out -> q_in`` (revoked by R-59 for every reflector shape).
 """
 
 from __future__ import annotations
@@ -33,7 +41,9 @@ __all__ = [
     "GaussianBeam",
     "eta_parallel_curved",
     "eta_parallel_flat",
+    "flat_round_trip_q",
     "misalignment_factor",
+    "overlap_coefficients",
     "round_trip_q",
 ]
 
@@ -119,6 +129,30 @@ def round_trip_q(beam: GaussianBeam, gap_m: FloatArray | float, focal_m: float) 
     return out
 
 
+def flat_round_trip_q(beam: GaussianBeam, gap_m: FloatArray | float) -> ComplexArray:
+    """Round-trip beam parameter of a *flat* mirror, ``q_out = i zR + 2g`` (doc 03 §b).
+
+    The ``f -> inf`` limit of :func:`round_trip_q`: the return is free
+    propagation of the mode over the full path ``2g``. Used by the flat plane
+    of the cylinder and by the plane and wedge reflectors (doc 03 §d, R-59).
+
+    Parameters
+    ----------
+    beam : GaussianBeam
+        Fiber mode.
+    gap_m : numpy.ndarray or float
+        One-way gap g (possibly time-varying ``A + dz``), m.
+
+    Returns
+    -------
+    numpy.ndarray of complex
+        q_out (broadcast over ``gap_m``).
+    """
+    g = np.asarray(gap_m, dtype=np.float64)
+    out: ComplexArray = np.asarray(2.0 * g + 1j * beam.rayleigh_range_m, dtype=np.complex128)
+    return out
+
+
 def eta_parallel_curved(
     beam: GaussianBeam, gap_m: FloatArray | float, radius_of_curvature_m: float
 ) -> FloatArray:
@@ -127,8 +161,11 @@ def eta_parallel_curved(
     ``eta_par^x = 2 sqrt(zR Im q_out) / | -i zR - q_out |`` with
     ``q_out = round_trip_q(beam, g, f = -R_c/2)``.
 
+    Closed form (doc 03 §d): ``eta_par^x = R_c zR / sqrt((g^2 + zR^2)((R_c + g)^2 + zR^2))``.
     Limits: ``R_c -> inf`` reproduces :func:`eta_parallel_flat`; ``g -> 0``
-    gives 1 (perfect re-coupling at zero gap).
+    gives ``R_c / sqrt(R_c^2 + zR^2)`` -- **not** 1: the convex mirror imprints
+    its curvature on the returned wavefront even at zero gap (0.752 at
+    ``R_c = 62.5 um``, 1550 nm; doc 03 §g).
 
     Parameters
     ----------
@@ -176,15 +213,76 @@ def eta_parallel_flat(beam: GaussianBeam, gap_m: FloatArray | float) -> FloatArr
     return out
 
 
+def overlap_coefficients(
+    beam: GaussianBeam, q_out: ComplexArray | complex
+) -> tuple[FloatArray, FloatArray, FloatArray]:
+    """Coefficients ``(C_dd, C_da, C_aa)`` of the full mode overlap (doc 03 §d, R-59).
+
+    The per-plane overlap of the fiber mode (``q_in = i zR``) with a returned
+    Gaussian beam of parameter ``q_out``, offset ``d`` and tilt ``alpha`` is
+    ``eta_par * exp[-(C_dd d^2 + C_da d alpha + C_aa alpha^2)]`` with
+    ``a = i k / (2 q_out) = 1/w^2 + i k / (2 R_wave)``, ``b = 1/w0^2`` and
+
+    * ``C_dd = 2 b (|a|^2 + b Re a) / |a + b|^2``,
+    * ``C_da = -2 k b Im a / |a + b|^2``,
+    * ``C_aa = k^2 (Re a + b) / (2 |a + b|^2)``.
+
+    Matched limit ``q_out -> q_in`` (``a -> b``): ``C_dd -> 1/w0^2``,
+    ``C_da -> 0``, ``C_aa -> 1/theta0^2``. A diverging return (convex mirror,
+    ``Im a > 0``) gives ``C_da < 0``: for ``d alpha > 0`` the cross term lowers
+    the loss (the wavefront curvature partly compensates the angular walk-off;
+    doc 03 §d').
+
+    Parameters
+    ----------
+    beam : GaussianBeam
+        Fiber mode.
+    q_out : numpy.ndarray or complex
+        Complex beam parameter of the returned beam at the fiber plane, m.
+
+    Returns
+    -------
+    tuple of numpy.ndarray
+        ``(C_dd [1/m^2], C_da [1/(m rad)], C_aa [1/rad^2])`` broadcast over
+        ``q_out``.
+    """
+    q = np.asarray(q_out, dtype=np.complex128)
+    k = 2.0 * np.pi / beam.wavelength_m
+    a = 1j * k / (2.0 * q)
+    b = 1.0 / beam.waist_radius_m**2
+    norm = np.abs(a + b) ** 2
+    c_dd: FloatArray = 2.0 * b * (np.abs(a) ** 2 + b * a.real) / norm
+    c_da: FloatArray = -2.0 * k * b * a.imag / norm
+    c_aa: FloatArray = k**2 * (a.real + b) / (2.0 * norm)
+    return c_dd, c_da, c_aa
+
+
 def misalignment_factor(
     beam: GaussianBeam,
     offset_m: FloatArray | float,
     angle_rad: FloatArray | float,
+    *,
+    q_out: ComplexArray | complex,
 ) -> FloatArray:
-    """Gaussian misalignment factor ``exp[-(d/w0)^2 - (alpha/theta0)^2]`` (doc 03 §4).
+    """Full-overlap misalignment factor of the returned beam (doc 03 §d, R-59).
 
-    ``d`` is the transverse offset and ``alpha`` the angular tilt of the
-    returned beam relative to the fiber mode.
+    ``exp[-(C_dd d^2 + C_da d alpha + C_aa alpha^2)]`` with the coefficients
+    of :func:`overlap_coefficients` evaluated at the returned beam parameter
+    ``q_out``. ``d`` is the transverse offset and ``alpha`` the angular tilt of
+    the returned beam relative to the fiber mode at the endface (field
+    convention ``exp(-ikz)``).
+
+    ``q_out`` is **required** (keyword-only): the former three-argument form
+    ``exp[-(d/w0)^2 - (alpha/theta0)^2]`` is the matched limit
+    ``q_out = i zR`` and is wrong for the mismatched return of a convex or
+    flat mirror (R-59, S-30). Passing ``q_out = 1j * beam.rayleigh_range_m``
+    reproduces it identically.
+
+    Closed forms (doc 03 §d, special cases verified by golden tests): on the
+    maps of a curved plane (``d = (2g/R_c) D``, ``alpha = (2/R_c) D``) the factor
+    is ``exp(-D^2/sigma_eff^2)`` with ``sigma_eff = (w0/2) sqrt(1 + ((R_c + g)/zR)^2)``;
+    on a flat plane (``d = 2 g theta``, ``alpha = 2 theta``) it is
+    ``exp[-(2 theta/theta0)^2]``, independent of the gap.
 
     Parameters
     ----------
@@ -194,6 +292,9 @@ def misalignment_factor(
         Transverse offset d, m.
     angle_rad : numpy.ndarray or float
         Angular misalignment alpha, rad.
+    q_out : numpy.ndarray or complex
+        Returned-beam parameter at the fiber plane (:func:`round_trip_q` for a
+        curved mirror, :func:`flat_round_trip_q` for a flat one), m.
 
     Returns
     -------
@@ -202,5 +303,6 @@ def misalignment_factor(
     """
     d = np.asarray(offset_m, dtype=np.float64)
     alpha = np.asarray(angle_rad, dtype=np.float64)
-    out: FloatArray = np.exp(-((d / beam.waist_radius_m) ** 2) - (alpha / beam.divergence_rad) ** 2)
+    c_dd, c_da, c_aa = overlap_coefficients(beam, q_out)
+    out: FloatArray = np.exp(-(c_dd * d**2 + c_da * d * alpha + c_aa * alpha**2))
     return out

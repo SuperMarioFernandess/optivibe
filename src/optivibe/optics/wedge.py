@@ -1,7 +1,7 @@
 """Wedge reflector coupling model eta(q_tip) -- a tilted plane (S9-B).
 
-Physics (doc 03 §c; S9-B addendum to 03/04)
--------------------------------------------
+Physics (doc 03 §c-§d; addendum S9-B, R-43; R-59)
+-------------------------------------------------
 A *wedge* is a flat mirror carrying a fixed built-in tilt ``alpha_w`` of its
 face (doc 03 §c table: a wedge is a face-tilted plane). Reflection doubles the
 surface tilt, so the return beam picks up a **constant angular offset
@@ -16,12 +16,14 @@ the flat-mirror maps (doc 03 §d) become, with ``theta_eff = theta_y + alpha_w``
 * x-z plane:  ``d_x = 2 g * (theta_y + alpha_w)``, ``alpha_x = 2 * (theta_y + alpha_w)``;
 * y-z plane:  ``d_y = 2 g * theta_x``, ``alpha_y = 2 * theta_x`` (untouched plane).
 
-Each plane keeps the flat parallel factor ``eta_par_flat(g) = 1/sqrt(1+(g/zR)^2)``,
-so ``eta = eta_x * eta_y`` and ``g = A + dz``. At ``alpha_w = 0`` every map
-reduces to :class:`~optivibe.optics.plane.PlaneOpticsModel` exactly. With
-``alpha_w != 0`` the aligned coupling drops as ``exp[-(2 g alpha_w/w0)^2
--(2 alpha_w/theta0)^2]`` (doc 03 §c: the connection falls off with the wedge
-angle), shifting the operating point. The displacement bias ``Delta x0`` is
+Each plane keeps the flat parallel factor ``eta_par_flat(g) = 1/sqrt(1+(g/zR)^2)``
+and the full overlap with the flat-mirror return ``q_out = i zR + 2g`` (doc 03
+§d, R-59), so ``eta = eta_x * eta_y`` and ``g = A + dz``. At ``alpha_w = 0`` every
+map reduces to :class:`~optivibe.optics.plane.PlaneOpticsModel` exactly. With
+``alpha_w != 0`` the aligned coupling drops as ``exp[-(2 alpha_w/theta0)^2]``,
+**independent of the gap** (doc 03 §c, R-59; the former
+``exp[-(2 g alpha_w/w0)^2 - (2 alpha_w/theta0)^2]`` was the matched-beam limit
+and is revoked), shifting the operating point. The displacement bias ``Delta x0`` is
 irrelevant for a flat mirror and is ignored.
 
 Validity: the gap guard (``A > 0``) and the paraxial wedge-angle range
@@ -37,7 +39,12 @@ import numpy as np
 
 from optivibe.core.config.models import VariantConfig
 from optivibe.core.types import FloatArray
-from optivibe.optics.gaussian import GaussianBeam, eta_parallel_flat, misalignment_factor
+from optivibe.optics.gaussian import (
+    GaussianBeam,
+    eta_parallel_flat,
+    flat_round_trip_q,
+    misalignment_factor,
+)
 from optivibe.optics.reflector import GaussianOverlapModel
 
 __all__ = ["MAX_WEDGE_ANGLE_RAD", "WedgeOpticsModel"]
@@ -143,10 +150,11 @@ class WedgeOpticsModel(GaussianOverlapModel):
         eff_y = np.asarray(theta_y, dtype=np.float64) + self.wedge_angle_rad
         theta_x_arr = np.asarray(theta_x, dtype=np.float64)
         eta_par = eta_parallel_flat(self.beam, gap)
+        q_out = flat_round_trip_q(self.beam, gap)
         offset_x = 2.0 * gap * eff_y
         angle_x = 2.0 * eff_y
-        eta_x = eta_par * misalignment_factor(self.beam, offset_x, angle_x)
+        eta_x = eta_par * misalignment_factor(self.beam, offset_x, angle_x, q_out=q_out)
         offset_y = 2.0 * gap * theta_x_arr
         angle_y = 2.0 * theta_x_arr
-        eta_y = eta_par * misalignment_factor(self.beam, offset_y, angle_y)
+        eta_y = eta_par * misalignment_factor(self.beam, offset_y, angle_y, q_out=q_out)
         return np.atleast_1d(eta_x), np.atleast_1d(eta_y)

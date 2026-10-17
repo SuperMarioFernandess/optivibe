@@ -55,6 +55,26 @@ def variant_b(config_dir: Path) -> VariantConfig:
     return load_variant("B", config_dir)
 
 
+# --------------------------------------------------------------------------- #
+# Base chain of the target sensitivity (doc 05 §2) on R-59 inputs.
+# --------------------------------------------------------------------------- #
+#: Effective slope (d eta/d dx)_eff of variant B at its L = 2.0 mm, 1/m (doc 03 §d'', R-59).
+SLOPE_EFF_B_DOC_03 = -3.574e4
+#: Working point eta0 of the R_c = 31 um platform at the configured bias (doc 03 §d'').
+ETA0_B_DOC_03 = 0.2663
+
+
+def _s_target_base(variant: VariantConfig, slope_eff: float = SLOPE_EFF_B_DOC_03) -> float:
+    """``s_target = R P rho (d eta/d dx)_eff H_QS`` on base inputs (doc 05 §2), A/(m/s^2).
+
+    ``H_QS = 0.0384 L^4 nm/g`` (L in mm; doc 02 §8, a 4-digit rounded coefficient,
+    ~5e-4 off the exact beam formula) and the effective slope of doc 03 §d''.
+    """
+    h_qs = 0.0384e-9 * (variant.length_m * 1.0e3) ** 4 / G0
+    gain = variant.responsivity_a_w * variant.source.power_w
+    return gain * variant.reflector.reflectivity * slope_eff * h_qs
+
+
 def _detector(variant: VariantConfig, f0: float, amp_g: float, axis: str = "x") -> DetectorOutput:
     """Forward chain modal -> cylinder -> photodiode for a single tone."""
     spec = SineSpec(
@@ -86,10 +106,18 @@ def test_static_default_is_bit_identical_to_v1(
 def test_static_plateau_matches_documented_s_target(
     variant_b: VariantConfig, constants: Constants
 ) -> None:
-    """The static plateau scalar is the signed s_target ~ -1.93e-7 (doc 13 SW-33)."""
+    """The static plateau scalar is the signed base-chain s_target of B (doc 05 §2, R-59).
+
+    ``s_target = R P rho (d eta/d dx)_eff H_QS`` with the effective slope of
+    variant B from doc 03 §d'' (-3.574e4 1/m) and ``H_QS = 0.0384 L^4 nm/g``
+    (doc 02 §8): -3.51e-8 A/(m/s^2). The former reference -1.93e-7 (doc 13 SW-33)
+    belonged to the revoked matched-beam multiplier. The anchor of the inverse
+    path -- ``static+ideal+plateau == v1`` bit-for-bit -- is pinned separately
+    and unchanged.
+    """
     model = StaticSensitivity(variant_b, constants)
     assert model.plateau_value == target_sensitivity(variant_b, constants)
-    assert model.plateau_value == pytest.approx(-1.93e-7, rel=0.05)
+    assert model.plateau_value == pytest.approx(_s_target_base(variant_b), rel=2.0e-3)
     assert model.plateau_value < 0.0
 
 

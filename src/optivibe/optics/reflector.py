@@ -7,11 +7,12 @@ Why a layer (doc 09 §3; task S9-B)
 ----------------------------------
 S3 shipped a single convex *cylinder* coupling model (:mod:`optivibe.optics.
 cylinder`). The reflector family (sphere / plane / wedge) shares the very same
-Gaussian-overlap framework (doc 03 §4): ``eta = eta_x * eta_y`` with per-plane
-parallel factors and a transverse/angular misalignment factor. Each shape only
-differs in (i) which parallel factor each plane uses (curved ABCD vs flat
-defocus) and (ii) how the geometric maps ``(d, alpha)`` depend on the tip
-state. This module factors that commonality:
+Gaussian-overlap framework (doc 03 §d): ``eta = eta_x * eta_y`` with per-plane
+parallel factors and the full-overlap misalignment factor of the returned beam
+(R-59: it depends on the returned-beam parameter ``q_out``). Each shape only
+differs in (i) which round trip each plane uses (curved ABCD ``f = -R_c/2`` vs
+flat free propagation over ``2g``) and (ii) how the geometric maps
+``(d, alpha)`` depend on the tip state. This module factors that commonality:
 
 * :class:`ReflectorModel` -- the structural contract every shape model meets
   (``eta_components`` + ``eta`` + ``eta_working_point``); identical to the

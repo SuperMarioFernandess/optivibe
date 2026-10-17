@@ -179,7 +179,15 @@ def test_shot_psd_welch(variant_b: VariantConfig, constants: Constants, eta0_b: 
 # --------------------------------------------------------------------------- #
 @pytest.mark.golden
 def test_nea_self_check(variant_b: VariantConfig, constants: Constants, eta0_b: float) -> None:
-    """Simulated noise floor matches the analytic NEA <= 15 %, right order vs doc 08."""
+    """Simulated noise floor matches the analytic NEA <= 15 %; base chain of R-59.
+
+    The analytic NEA uses the model's s_target; it must equal the base chain
+    ``sqrt(PSD)/|R P rho (d eta/d dx)_eff H_QS|`` with the effective slope of
+    variant B from doc 03 §d'' (-3.574e4 1/m, R-59) and the exact cantilever
+    compliance. Variant B: ~175 ug/sqrt(Hz) after R-59. The former
+    order-of-magnitude window 5-60 ug/sqrt(Hz) against the doc 08 shelf rested on
+    the SW-26 factor (pre-R-59); the shelves are recomputed in backlog M-26.
+    """
     fs = 20000.0
     s_target = _s_target(variant_b, constants, eta0_b)
     det = PhotodiodeDetector(scenario_seed=7)
@@ -192,11 +200,20 @@ def test_nea_self_check(variant_b: VariantConfig, constants: Constants, eta0_b: 
 
     assert nea_sim == pytest.approx(nea_analytic, rel=0.15)
 
-    # Order-of-magnitude agreement with the doc-08 shelf (~10.6 ug/rtHz); the
-    # exact model is higher by the documented SW-26 R_c factor (x1.57, not x2)
-    # and the balanced two-arm shot penalty (xsqrt(2)).
-    nea_ug = nea_analytic / G0 * 1e6
-    assert 5.0 < nea_ug < 60.0
+    # Base chain (doc 05 §2 on doc 03 §d'', R-59): same PSD, base effective slope.
+    f = constants.fiber
+    h_qs = (
+        f.density_kg_m3
+        * f.area_m2
+        * variant_b.length_m**4
+        / (8.0 * f.youngs_modulus_pa * f.inertia_m4)
+    )
+    gain = variant_b.responsivity_a_w * variant_b.source.power_w
+    s_base = abs(gain * variant_b.reflector.reflectivity * (-3.574e4) * h_qs)
+    assert eta0_b == pytest.approx(0.2663, abs=5e-5)  # doc 03 §d''
+    assert nea_analytic == pytest.approx(
+        math.sqrt(float(out.noise["psd_total_a2_hz"])) / s_base, rel=2e-4
+    )
 
 
 # --------------------------------------------------------------------------- #

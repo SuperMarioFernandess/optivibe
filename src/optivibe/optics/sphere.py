@@ -1,19 +1,24 @@
 """Convex-sphere reflector coupling model eta(q_tip) (S9-B).
 
-Physics (doc 03 §c-§e; S9-B addendum to 03/04)
-----------------------------------------------
+Physics (doc 03 §c-§e; addendum S9-B, R-43; R-59)
+-------------------------------------------------
 A convex *sphere* has the same curvature radius ``R_c`` in **both** transverse
 planes (doc 03 §c table), so the focal length ``f = -R_c/2`` applies to the
 x-z and the y-z plane alike. The Gaussian overlap still factorises,
-``eta = eta_x * eta_y`` (doc 03 §4), but now *both* factors take the **curved**
-form the cylinder used only in its power plane:
+``eta = eta_x * eta_y`` (doc 03 §d), but now *both* factors take the **curved**
+form the cylinder used only in its power plane -- the full overlap with the
+mismatched returned beam (``q_out`` of the round trip with ``f = -R_c/2``;
+R-59):
 
-* x-z plane:  ``eta_x = eta_par_curved(g, R_c) * exp[-(d_x/w0)^2 - (alpha_x/theta0)^2]``
-  with ``d_x = (2 g / R_c) * dx_eff``, ``alpha_x = (2 / R_c) * dx_eff`` and
-  ``dx_eff = Delta x0 + dx + (R_c + g) * theta_y`` (doc 04 §3 lever arm);
-* y-z plane:  ``eta_y = eta_par_curved(g, R_c) * exp[-(d_y/w0)^2 - (alpha_y/theta0)^2]``
-  with ``d_y = (2 g / R_c) * dy_eff``, ``alpha_y = (2 / R_c) * dy_eff`` and
-  ``dy_eff = Delta y0 + dy + (R_c + g) * theta_x``.
+* x-z plane:  ``eta_x = eta_par_curved(g, R_c) * exp[-(C_dd d_x^2 + C_da d_x alpha_x
+  + C_aa alpha_x^2)]`` with ``d_x = (2 g / R_c) * dx_eff``, ``alpha_x = (2 / R_c) * dx_eff`` and
+  ``dx_eff = Delta x0 + dx + (R_c + g) * theta_y`` (R-43 lever arm);
+* y-z plane:  the same with ``d_y = (2 g / R_c) * dy_eff``,
+  ``alpha_y = (2 / R_c) * dy_eff`` and ``dy_eff = Delta y0 + dy + (R_c + g) * theta_x``.
+
+Closed form (doc 03 §d, R-59): each factor is ``eta_par_curved * exp(-d_eff^2 /
+sigma_eff^2)``, ``sigma_eff = (w0/2) sqrt(1 + ((R_c + g)/zR)^2)``, so
+``eta = eta_par_curved^2 * exp(-|Delta_eff|^2 / sigma_eff^2)``.
 
 Both planes share the *same* parallel factor ``eta_par_curved`` because the
 curvature is identical, so the on-axis coupling is its square. The response is
@@ -41,7 +46,12 @@ import numpy as np
 
 from optivibe.core.config.models import VariantConfig
 from optivibe.core.types import FloatArray
-from optivibe.optics.gaussian import GaussianBeam, eta_parallel_curved, misalignment_factor
+from optivibe.optics.gaussian import (
+    GaussianBeam,
+    eta_parallel_curved,
+    misalignment_factor,
+    round_trip_q,
+)
 from optivibe.optics.reflector import GaussianOverlapModel
 
 __all__ = ["SphereOpticsModel"]
@@ -178,10 +188,11 @@ class SphereOpticsModel(GaussianOverlapModel):
             + (radius + gap) * np.asarray(theta_x, dtype=np.float64)
         )
         eta_par = eta_parallel_curved(self.beam, gap, radius)
+        q_out = round_trip_q(self.beam, gap, -radius / 2.0)  # same in both planes
         offset_x = (2.0 * gap / radius) * dx_eff
         angle_x = (2.0 / radius) * dx_eff
-        eta_x = eta_par * misalignment_factor(self.beam, offset_x, angle_x)
+        eta_x = eta_par * misalignment_factor(self.beam, offset_x, angle_x, q_out=q_out)
         offset_y = (2.0 * gap / radius) * dy_eff
         angle_y = (2.0 / radius) * dy_eff
-        eta_y = eta_par * misalignment_factor(self.beam, offset_y, angle_y)
+        eta_y = eta_par * misalignment_factor(self.beam, offset_y, angle_y, q_out=q_out)
         return np.atleast_1d(eta_x), np.atleast_1d(eta_y)

@@ -217,8 +217,19 @@ def test_golden_expected_hd2_matches_simulated_eta_second_harmonic(
     hd2_predicted = peak.amplitude_m_s2 / (accel * gain)
     assert hd2_predicted == pytest.approx(hd2_simulated, rel=0.02)
 
-    # Doc 20 §3.1 quotes THD ~ 0.03 % for exactly this drive.
-    assert hd2_predicted == pytest.approx(3.0e-4, rel=0.15)
+    # Closed form for the Gaussian eta(dx_eff) of R-59 (doc 03 §d/§e):
+    # HD2 = |4t^2 - 2| d / (8 t sigma_eff), t = Dx0/sigma_eff,
+    # sigma_eff = (w0/2) sqrt(1 + ((R_c + A)/zR)^2): 0.138 % for this drive.
+    # Doc 20 §3.1 quotes "THD ~ 0.03 %" -- the pre-R-59 value (sigma = 1.28 um);
+    # its text revision is the coordination's (S-30 report).
+    w0 = variant_b.optics.mode_field_radius_m
+    z_r = math.pi * w0**2 / variant_b.source.wavelength_m
+    radius = variant_b.reflector.radius_of_curvature_m
+    assert radius is not None
+    sigma_eff = 0.5 * w0 * math.sqrt(1.0 + ((radius + variant_b.optics.gap_m) / z_r) ** 2)
+    t = variant_b.optics.bias_offset_m / sigma_eff
+    hd2_closed = abs(4.0 * t**2 - 2.0) * tip_m / (8.0 * t * sigma_eff)
+    assert hd2_predicted == pytest.approx(hd2_closed, rel=1.0e-2)
 
 
 @pytest.mark.golden

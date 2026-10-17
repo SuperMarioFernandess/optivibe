@@ -1,7 +1,7 @@
 """Plane reflector coupling model eta(q_tip) -- the R_c -> inf reference (S9-B).
 
-Physics (doc 03 §c-§e, §g; S9-B addendum to 03/04)
---------------------------------------------------
+Physics (doc 03 §c-§e, §g; addendum S9-B, R-43; R-59)
+-----------------------------------------------------
 A flat mirror is the ``R_c -> inf`` limit: there is **no focusing**, so the
 curvature maps vanish (``2/R_c -> 0``) and a pure lateral shift of the mirror
 leaves the overlap unchanged to first order. The plane therefore has **zero
@@ -18,11 +18,16 @@ What remains are the two flat-mirror channels (doc 03 §d, flat plane):
 * gap (defocus): the aligned overlap is ``eta_par_flat(g) = 1/sqrt(1+(g/zR)^2)``
   in **both** planes, so the on-axis ceiling is ``1/(1+(g/zR)^2)`` (doc 03 §c).
 
-Hence ``eta = eta_x * eta_y`` with, for each plane,
-``eta_i = eta_par_flat(g) * exp[-(d_i/w0)^2 - (alpha_i/theta0)^2]`` and the
-x-z plane driven by ``theta_y``, the y-z plane by ``theta_x``. The gap is
-``g = A + dz``. The displacement bias ``Delta x0`` is irrelevant for a flat
-mirror (no displacement coupling) and is ignored.
+Hence ``eta = eta_x * eta_y`` with, for each plane, the full overlap with the
+returned beam ``q_out = i zR + 2g`` (free propagation over ``2g``; doc 03 §d,
+R-59): ``eta_i = eta_par_flat(g) * exp[-(C_dd d_i^2 + C_da d_i alpha_i + C_aa alpha_i^2)]``,
+the x-z plane driven by ``theta_y``, the y-z plane by ``theta_x``. On the
+flat-plane maps this is exactly ``eta_par_flat(g) * exp[-(2 theta/theta0)^2]``:
+the angular width is ``theta0/2`` (47.44 mrad at 1550 nm) and does **not**
+depend on the gap (R-59; the former ``exp[-(2 g theta/w0)^2 - (2 theta/theta0)^2]``
+was the matched-beam limit and is revoked). The gap is ``g = A + dz``. The
+displacement bias ``Delta x0`` is irrelevant for a flat mirror (no displacement
+coupling) and is ignored.
 
 Validity: only the gap guard (``A > 0``) applies -- the finite-aperture guard
 ``w(A) <= R_c/3`` is vacuous for an (idealised) infinite plane (doc 03 §6).
@@ -36,7 +41,12 @@ import numpy as np
 
 from optivibe.core.config.models import VariantConfig
 from optivibe.core.types import FloatArray
-from optivibe.optics.gaussian import GaussianBeam, eta_parallel_flat, misalignment_factor
+from optivibe.optics.gaussian import (
+    GaussianBeam,
+    eta_parallel_flat,
+    flat_round_trip_q,
+    misalignment_factor,
+)
 from optivibe.optics.reflector import GaussianOverlapModel
 
 __all__ = ["PlaneOpticsModel"]
@@ -123,10 +133,11 @@ class PlaneOpticsModel(GaussianOverlapModel):
         theta_y_arr = np.asarray(theta_y, dtype=np.float64)
         theta_x_arr = np.asarray(theta_x, dtype=np.float64)
         eta_par = eta_parallel_flat(self.beam, gap)
+        q_out = flat_round_trip_q(self.beam, gap)
         offset_x = 2.0 * gap * theta_y_arr
         angle_x = 2.0 * theta_y_arr
-        eta_x = eta_par * misalignment_factor(self.beam, offset_x, angle_x)
+        eta_x = eta_par * misalignment_factor(self.beam, offset_x, angle_x, q_out=q_out)
         offset_y = 2.0 * gap * theta_x_arr
         angle_y = 2.0 * theta_x_arr
-        eta_y = eta_par * misalignment_factor(self.beam, offset_y, angle_y)
+        eta_y = eta_par * misalignment_factor(self.beam, offset_y, angle_y, q_out=q_out)
         return np.atleast_1d(eta_x), np.atleast_1d(eta_y)

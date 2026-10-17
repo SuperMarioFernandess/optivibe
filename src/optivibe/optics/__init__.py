@@ -4,7 +4,8 @@ S3 shipped the physical Gaussian-beam model of the convex *cylinder*
 (docs 03/04). S9-B generalises it to a **reflector family** behind a shape
 layer (:mod:`optivibe.optics.reflector`):
 
-* :mod:`optivibe.optics.gaussian` holds the beam / ABCD / overlap formulas;
+* :mod:`optivibe.optics.gaussian` holds the beam / ABCD / overlap formulas
+  (the full overlap of the mismatched returned beam, R-59);
 * :mod:`optivibe.optics.reflector` defines the ``ReflectorModel`` protocol, the
   ``REFLECTOR_MODEL_REGISTRY`` (shape -> frozen model) and the shape-dispatching
   :class:`~optivibe.optics.reflector.ReflectorOptics` stage;
@@ -29,7 +30,9 @@ from optivibe.optics.gaussian import (
     GaussianBeam,
     eta_parallel_curved,
     eta_parallel_flat,
+    flat_round_trip_q,
     misalignment_factor,
+    overlap_coefficients,
     round_trip_q,
 )
 from optivibe.optics.plane import PlaneOpticsModel
@@ -85,10 +88,12 @@ __all__ = [
     "coherence_length_m",
     "eta_parallel_curved",
     "eta_parallel_flat",
+    "flat_round_trip_q",
     "fringe_visibility",
     "linewidth_nu_hz",
     "min_gap_for_washout_m",
     "misalignment_factor",
+    "overlap_coefficients",
     "rin_ase",
     "rin_ase_db_hz",
     "round_trip_q",

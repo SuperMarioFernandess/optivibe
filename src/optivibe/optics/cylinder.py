@@ -1,29 +1,38 @@
 """Cylindrical-reflector coupling model eta(q_tip) and its pipeline stage (S3).
 
-Physics (docs 03 §4-§5, 04 §3-§4)
----------------------------------
+Physics (docs 03 §d-§e, 04 §3-§4; R-59)
+---------------------------------------
 The convex *cylindrical* mirror (curved in the x-z plane, flat along y) makes
-the coupling factorize per plane, ``eta = eta_x * eta_y``:
+the coupling factorize per plane, ``eta = eta_x * eta_y``. Each factor is the
+**full** overlap of the fiber mode with the returned beam (doc 03 §d, R-59):
+``eta_i = eta_par^i(g) * exp[-(C_dd d_i^2 + C_da d_i alpha_i + C_aa alpha_i^2)]``,
+coefficients of the returned-beam parameter ``q_out`` (:func:`~optivibe.optics.
+gaussian.overlap_coefficients`).
 
-* curved plane:   ``eta_x = eta_par^x(g) * exp[-(d_x/w0)^2 - (alpha_x/theta0)^2]``
-  with the geometric maps ``d_x = (2 g / R_c) * dx_eff``,
-  ``alpha_x = (2 / R_c) * dx_eff`` and the *effective* decentering
-  ``dx_eff = Delta x0 + dx + (R_c + g) * theta_y`` (doc 04 §3: tilt acts as a
-  displacement through the lever arm ``R_c + A``);
-* flat plane:     ``eta_y = eta_par^y(g) * exp[-(d_y/w0)^2 - (alpha_y/theta0)^2]``
-  with ``d_y = 2 g * theta_x``, ``alpha_y = 2 * theta_x`` — *independent of
-  dy* (translation along the cylinder axis is a symmetry of the mirror).
+* curved plane: ``q_out`` of the round trip with ``f = -R_c/2``; maps
+  ``d_x = (2 g / R_c) * dx_eff``, ``alpha_x = (2 / R_c) * dx_eff`` with the
+  *effective* decentering ``dx_eff = Delta x0 + dx + (R_c + g) * theta_y``
+  (R-43: tilt acts as a displacement through the lever arm ``R_c + g``, the
+  distance from the endface to the centre of curvature);
+* flat plane: ``q_out = i zR + 2g``; maps ``d_y = 2 g * theta_x``,
+  ``alpha_y = 2 * theta_x`` -- *independent of dy* (translation along the
+  cylinder axis is a symmetry of the mirror).
 
-The gap is ``g = A + dz``; the Delta z channel enters only through
-``eta_par(g)`` and the ``d``-maps. Because the dependence on ``dx_eff`` is an
-exact Gaussian, the working point and slope have closed forms with
-``1/sigma^2 = (2 g / (R_c w0))^2 + (2 / (R_c theta0))^2`` (doc 04 §4).
+The gap is ``g = A + dz``. Closed forms (doc 03 §d, R-59; identities pinned by
+golden tests): ``eta_x = eta_par^x(g) * exp(-dx_eff^2 / sigma_eff^2)`` with
+``sigma_eff = (w0/2) sqrt(1 + ((R_c + g)/zR)^2) = w(R_c + g)/2`` -- half the
+beam radius in the plane of the centre of curvature, ``= sigma_base /
+eta_par^x`` -- and ``eta_y = eta_par^y(g) * exp[-(2 theta_x/theta0)^2]`` (angular
+width ``theta0/2``, independent of the gap). Because ``eta_x`` is an exact
+Gaussian in ``dx_eff``, the working point, slopes and bias rule keep closed
+forms in ``sigma_eff``.
 
-Calibration (S3, journal 2026-06-12): with the documented w0 = 5.2 um,
-Delta x0 = 2 um, R_c = 62.5 um, the gap A = 31 um anchors eta0 (~0.24 vs 0.25),
-eta_peak (~0.44 vs 0.42), the bare slope (~-1.44e5 vs -1.5e5 1/m, doc 04 §4)
-and the effective slope at L = 1.4 mm (~-1.57e5 vs -1.6e5 1/m, docs 05 §1 /
-08) all within 5 %.
+Reference values (doc 03 §d'', variant A: w0 = 5.2 um, A = 31 um,
+R_c = 62.5 um, Delta x0 = 2 um): ``sigma_eff = 5.1415 um``, ``eta_peak = 0.4369``,
+``eta0 = 0.3755``, bare slope ``-5.683e4 1/m``. The S3 calibration of A = 31 um
+(journal 2026-06-12) anchored the *pre*-R-59 multiplier to the doc 04/05
+references; after R-59 those references moved (doc 03 §d''). This is a model
+statement: L3 is not passed.
 """
 
 from __future__ import annotations
@@ -39,7 +48,10 @@ from optivibe.optics.gaussian import (
     GaussianBeam,
     eta_parallel_curved,
     eta_parallel_flat,
+    flat_round_trip_q,
     misalignment_factor,
+    overlap_coefficients,
+    round_trip_q,
 )
 from optivibe.optics.reflector import ReflectorOptics
 
@@ -182,13 +194,13 @@ class CylinderOpticsModel:
         offset_x = (2.0 * gap / radius) * dx_eff
         angle_x = (2.0 / radius) * dx_eff
         eta_x = eta_parallel_curved(self.beam, gap, radius) * misalignment_factor(
-            self.beam, offset_x, angle_x
+            self.beam, offset_x, angle_x, q_out=round_trip_q(self.beam, gap, -radius / 2.0)
         )
         theta_x_arr = np.asarray(theta_x, dtype=np.float64)
         offset_y = 2.0 * gap * theta_x_arr
         angle_y = 2.0 * theta_x_arr
         eta_y = eta_parallel_flat(self.beam, gap) * misalignment_factor(
-            self.beam, offset_y, angle_y
+            self.beam, offset_y, angle_y, q_out=flat_round_trip_q(self.beam, gap)
         )
         return np.atleast_1d(eta_x), np.atleast_1d(eta_y)
 
@@ -219,18 +231,28 @@ class CylinderOpticsModel:
         return out
 
     # ------------------------------------------------------------------ #
-    # Working-point scalars (closed forms, doc 04 §4).
+    # Working-point scalars (closed forms, docs 03 §e / 04 §4; R-59).
     # ------------------------------------------------------------------ #
     @property
     def sigma_m(self) -> float:
-        """Gaussian width of eta(dx_eff) at the nominal gap, m.
+        """Gaussian width ``sigma_eff`` of eta(dx_eff) at the nominal gap, m (R-59).
 
-        ``1/sigma^2 = (2 A / (R_c w0))^2 + (2 / (R_c theta0))^2`` (doc 04 §4).
+        Evaluated from the same full overlap that drives :meth:`eta`: on the
+        curved-plane maps the exponent per unit ``dx_eff^2`` is
+        ``1/sigma^2 = (2/R_c)^2 (C_dd A^2 + C_da A + C_aa)``. It equals the closed
+        form ``sigma_eff = (w0/2) sqrt(1 + ((R_c + A)/zR)^2) = sigma_base / eta_par^x``
+        of doc 03 §d (golden identity; 5.1415 um for variant A, 3.9257 um for
+        B/C/D, doc 03 §d''). The pre-R-59 width
+        ``sigma_base = (w0/2) R_c / sqrt(A^2 + zR^2)`` (2.5808 / 1.2801 um) belonged
+        to the matched-beam multiplier and is revoked.
         """
         radius = self.radius_of_curvature_m
-        term_offset = 2.0 * self.gap_m / (radius * self.beam.waist_radius_m)
-        term_angle = 2.0 / (radius * self.beam.divergence_rad)
-        return 1.0 / math.sqrt(term_offset**2 + term_angle**2)
+        gap = self.gap_m
+        c_dd, c_da, c_aa = overlap_coefficients(
+            self.beam, round_trip_q(self.beam, gap, -radius / 2.0)
+        )
+        inv_sigma_sq = float((2.0 / radius) ** 2 * (c_dd * gap**2 + c_da * gap + c_aa))
+        return 1.0 / math.sqrt(inv_sigma_sq)
 
     def eta_peak(self) -> float:
         """Aligned-peak coupling ``eta_par^x(A) * eta_par^y(A)`` (dx_eff = 0)."""
@@ -240,15 +262,16 @@ class CylinderOpticsModel:
         )
 
     def eta_working_point(self) -> float:
-        """Return the static working point ``eta0 = eta_peak * exp(-(Dx0/sigma)^2)``."""
+        """Return the static working point ``eta0 = eta_peak * exp(-(Dx0/sigma_eff)^2)``."""
         return float(self.eta().item())
 
     def slope_dx(self) -> float:
-        """Analytical bare slope ``d eta / d dx = -2 eta0 Delta x0 / sigma^2``, 1/m.
+        """Analytical bare slope ``d eta / d dx = -2 eta0 Delta x0 / sigma_eff^2``, 1/m.
 
         Exact derivative of the Gaussian ``eta(dx_eff)`` at the working point
-        (doc 04 §4; reference ~ -1.5e5 1/m for R_c = 62.5 um). Zero when the
-        bias is zero — at the peak the response is purely quadratic.
+        (docs 03 §e / 04 §4, R-59; reference -5.683e4 1/m for variant A, doc 03
+        §d''; the pre-R-59 -1.44e5 is revoked). Zero when the bias is zero — at
+        the peak the response is purely quadratic.
         """
         return -2.0 * self.eta_working_point() * self.bias_m / self.sigma_m**2
 
@@ -277,7 +300,8 @@ class CylinderOpticsModel:
 
         ``(d eta / d dx)_eff = slope_dx * [1 + 1.377 (R_c + A) / L]`` — the
         tip tilt theta_y = 1.377 dx / L adds a displacement through the lever
-        arm R_c + A. Reference ~ -1.6e5 1/m at L = 1.4 mm, R_c = 62.5 um.
+        arm R_c + A (R-43). References (doc 03 §d'', R-59): -5.829e4 1/m for
+        variant A (L = 5 mm), -6.205e4 1/m at L = 1.4 mm on the same platform.
 
         Parameters
         ----------
@@ -294,11 +318,18 @@ class CylinderOpticsModel:
         return self.slope_dx() * self.tilt_multiplier(length_m, tilt_coupling_per_l)
 
     def anisotropy(self, length_m: float, tilt_coupling_per_l: float) -> float:
-        """Target-to-cross angular-map anisotropy ``L / (1.377 R_c)`` (doc 04 §5).
+        """Target-to-cross angular-map anisotropy ``L / (1.377 R_c)`` (doc 04 §6).
 
         Ratio of the angular misalignment produced per unit dx (through the
         curved-plane map) to that per unit dy (through the tilt-only flat-plane
         map): ~35x at L = 3 mm, R_c = 62.5 um.
+
+        After R-59 this is the ratio of the angular **maps**, not of the
+        sensitivities: the curved-plane angular term is almost cancelled by the
+        overlap cross term, and the width ratio is
+        ``M L / (1.377 sqrt((R_c + A)^2 + zR^2))`` (doc 03 §e). Which ratio is the
+        tolerance metric is an open decision (backlog M-25); the value returned
+        here is unchanged.
 
         Parameters
         ----------
@@ -322,8 +353,10 @@ class CylinderOpticsModel:
 
         Closed form of the SNR-optimum rule eta0 ~ 0.37 eta_peak (doc 08,
         R-40/O-05): since eta(dx_eff) is exactly Gaussian,
-        ``Delta x0 = sigma * sqrt(-ln ratio)``. Exposed as a design helper
-        (S4/S6); in v1 the bias is a static config value.
+        ``Delta x0 = sigma_eff * sqrt(-ln ratio)`` -- 5.1267 um (R_c = 62.5 um)
+        and 3.9144 um (R_c = 31 um) at the 0.37 rule (doc 03 §d'', R-59).
+        Exposed as a design helper (S4/S6); in v1 the bias is a static config
+        value (the configured biases are not changed here -- backlog M-25).
 
         Parameters
         ----------

@@ -3,10 +3,11 @@
 Covers the end-to-end truth-vs-recovery error budget (and the displacement-floor
 separation of §8), the NEA budget with its contribution split and analytic
 cross-check (<= 15 %, SW-29), the design and response parameter sweeps (the
-``NEA ~ L^-4`` law of doc 07 and the SW-26 ``R_c`` refinement -- x1.57 NEA gain,
-not x2), the tolerance Monte-Carlo with ``epsilon_x`` and its reproducibility by
-seed, the npz persistence, the spec validation guards, the CLI exit codes and the
-head-less figures. Run sizes are kept small for speed.
+``NEA ~ L^-4`` law of doc 07 and the R-59 ``R_c`` law -- at a fixed eta0/eta_peak
+halving R_c lowers the slope x0.851; the SW-26 x1.31/x1.57 is revoked), the
+tolerance Monte-Carlo with ``epsilon_x`` and its reproducibility by seed, the npz
+persistence, the spec validation guards, the CLI exit codes and the head-less
+figures. Run sizes are kept small for speed.
 """
 
 from __future__ import annotations
@@ -136,8 +137,28 @@ def test_nea_budget_plateau_and_split(variant_b: VariantConfig, constants: Const
     art = _run(variant_b, 200.0, 0.01)
     budget = nea_budget(art.forward.detector, variant_b, constants)
     assert budget is not None
-    nea_ug = budget.nea_plateau / G0 * 1e6
-    assert 10.0 <= nea_ug <= 60.0  # matched B ~ 24.6 ug/sqrt(Hz) (SW-29 window)
+    # Base chain (07 §1-§2, 17 §2) on R-59 inputs: eta0 = 0.2663 and the effective
+    # slope -3.574e4 1/m of doc 03 §d'', H_QS = 0.0384 L^4 nm/g (doc 02 §8); B gives
+    # ~175 ug/sqrt(Hz). The former SW-29 window 10-60 (doc 08 shelf + SW-26) is
+    # pre-R-59; shelves are recomputed in backlog M-26.
+    from optivibe.detector.photodiode import noise_psd
+    from optivibe.mechanics.thermal import nea_thermal
+
+    gain = variant_b.responsivity_a_w * variant_b.source.power_w
+    rho = variant_b.reflector.reflectivity
+    i_dc = gain * (variant_b.endface_reflectivity + rho * 0.2663)
+    psd = noise_psd(
+        i_dc,
+        variant_b,
+        constants,
+        balanced=variant_b.detector.balanced,
+        reference_arm=variant_b.detector.reference_arm,
+    )
+    h_qs = 0.0384e-9 * (variant_b.length_m * 1.0e3) ** 4 / G0
+    s_base = abs(gain * rho * (-3.574e4) * h_qs)
+    thermal = nea_thermal(constants, variant_b.length_m, variant_b.q_total)
+    expected = math.hypot(math.sqrt(psd["total"]) / s_base, thermal)
+    assert budget.nea_plateau == pytest.approx(expected, rel=3e-3)
     parts = budget.psd_components
     assert parts["shot"] + parts["rin"] + parts["johnson"] == pytest.approx(
         parts["total"], rel=1e-9
@@ -288,20 +309,47 @@ def test_design_sweep_nea_scales_inverse_l4(constants: Constants) -> None:
 
 
 @pytest.mark.golden
-def test_sw26_rc_gain_is_157_not_2(constants: Constants) -> None:
-    """At scale-equivalent bias, R_c 62.5 -> 31 um lifts NEA by ~1.57x (SW-26)."""
-    base = load_variant("A")  # R_c = 62.5 um, bias 2 um
-    scaled = with_overrides(
-        base,
-        radius_of_curvature_m=31.0e-6,
-        bias_offset_m=base.optics.bias_offset_m * 31.0 / 62.5,  # sigma ~ R_c
+def test_rc_halving_at_fixed_eta_ratio_follows_r59(constants: Constants) -> None:
+    """At a fixed eta0/eta_peak = 0.37 (R-40), R_c 62.5 -> 31 um lowers the slope (R-59).
+
+    Doc 03 §e (R-59): at a fixed working-point ratio the bare slope is
+    proportional to ``eta_par^x / sigma_eff ~ R_c / ((R_c + A)^2 + zR^2)``, so
+    halving R_c *lowers* it x0.851 (optimum ``R_c* = sqrt(A^2 + zR^2) ~ 63 um``);
+    ``s_target`` follows with the tilt multiplier ``1 + 1.377 (R_c + A)/L``
+    (doc 05 §1). Revoked: the SW-26 / R-42 statement "x1.31 slope, x1.57 NEA
+    gain at the scale-equivalent bias Delta x0 ~ R_c". The NEA ratio is *not*
+    pinned: it is not the slope ratio alone, because eta0 and hence I_DC and the
+    shot floor also drop with R_c (on platform A the two effects nearly cancel,
+    NEA x0.98) -- the family-level recalculation is backlog M-26.
+    """
+    from optivibe.optics import CylinderOpticsModel
+
+    base = load_variant("A")  # R_c = 62.5 um
+
+    def at_rule(variant: VariantConfig) -> VariantConfig:
+        bias = CylinderOpticsModel.from_config(variant).bias_for_eta_ratio(0.37)
+        return with_overrides(variant, bias_offset_m=bias)
+
+    p625 = analytic_point(at_rule(base), constants)
+    p31 = analytic_point(at_rule(with_overrides(base, radius_of_curvature_m=31.0e-6)), constants)
+    assert p625.eta_ratio == pytest.approx(0.37, rel=1e-9)
+    assert p31.eta_ratio == pytest.approx(0.37, rel=1e-9)
+
+    w0 = base.optics.mode_field_radius_m
+    z_r = math.pi * w0**2 / base.source.wavelength_m
+    gap, length = base.optics.gap_m, base.length_m
+    coupling = constants.tilt_displacement_coupling_per_l
+
+    def law(radius: float) -> float:
+        multiplier = 1.0 + coupling * (radius + gap) / length
+        return radius / ((radius + gap) ** 2 + z_r**2) * multiplier
+
+    ratio = abs(p31.s_target) / abs(p625.s_target)
+    assert ratio == pytest.approx(law(31.0e-6) / law(62.5e-6), rel=1e-9)
+    bare_ratio = (31.0e-6 / ((31.0e-6 + gap) ** 2 + z_r**2)) / (
+        62.5e-6 / ((62.5e-6 + gap) ** 2 + z_r**2)
     )
-    p625 = analytic_point(base, constants)
-    p31 = analytic_point(scaled, constants)
-    slope_ratio = abs(p31.s_target) / abs(p625.s_target)
-    nea_gain = p625.nea_plateau / p31.nea_plateau
-    assert slope_ratio == pytest.approx(1.31, rel=0.05)  # absolute slope x1.31, not x2
-    assert nea_gain == pytest.approx(1.57, rel=0.05)  # NEA gain x1.57
+    assert bare_ratio == pytest.approx(0.851, abs=5e-4)
 
 
 def test_design_sweep_over_variants(constants: Constants) -> None:
@@ -321,28 +369,44 @@ def test_design_sweep_over_variants(constants: Constants) -> None:
 # --------------------------------------------------------------------------- #
 # Parameter sweep: response.
 # --------------------------------------------------------------------------- #
-def test_response_sweep_saturates_above_50g(constants: Constants) -> None:
-    """The amplitude response is linear at low g and saturates (ADC clip + gain
-    droop + rising THD) toward >50 g (doc 00)."""
+def test_response_sweep_saturates_at_adc_full_scale(constants: Constants) -> None:
+    """Linear at low g; the ADC clips where ``|I_AC| = adc_full_scale`` (doc 05 §2, R-59).
+
+    The clip onset is ``a_clip = adc_full_scale / |s_target|`` with the base-chain
+    ``s_target`` (doc 05 §2 on doc 03 §d'' and doc 02 §8): ~378 g for variant B
+    after R-59. The B ADC range (1.3e-4 A) was sized as ~1.3x the pre-R-59
+    full-scale swing (~95 uA at 50 g), so the former "saturates above 50 g" no
+    longer holds -- the range is now ~7.6x the 50 g swing (17.2 uA); its revision
+    is backlog M-25 / S-28 (owner decision of S-30, 2026-10-17). Optical THD
+    grows with amplitude (doc 03 §e).
+    """
+    variant = load_variant("B")
+    h_qs = 0.0384e-9 * (variant.length_m * 1.0e3) ** 4 / G0
+    gain = variant.responsivity_a_w * variant.source.power_w
+    s_base = abs(gain * variant.reflector.reflectivity * (-3.574e4) * h_qs)
+    a_clip_g = variant.detector.adc_full_scale / s_base / G0
+    assert a_clip_g == pytest.approx(378.0, rel=5e-3)
     spec = SweepSpec(
         kind="sweep",
         name="amp",
         mode="response",
         variant="B",
         parameter="amplitude_g",
-        grid=AxisGrid(start=1.0, stop=200.0, num=8, log=True),
+        grid=AxisGrid(start=1.0, stop=1000.0, num=10, log=True),
         frequency_hz=200.0,
         fs_hz=5000.0,
         duration_s=0.3,
         seed=7,
     )
     result = run_sweep(spec, constants)
-    gain = result.metrics["gain_ratio"]
+    amplitude = result.axis_values
+    gain_ratio = result.metrics["gain_ratio"]
     clipped = result.metrics["n_clipped"]
     optical_thd = result.metrics["optical_thd_pct"]
-    assert gain[0] == pytest.approx(1.0, abs=0.05)  # linear at 1 g
-    assert clipped[-1] > 0  # saturates at the top of the range
-    assert gain[-1] < gain[0]  # gain droops under saturation
+    assert gain_ratio[0] == pytest.approx(1.0, abs=0.05)  # linear at 1 g
+    assert np.all(clipped[amplitude < 0.9 * a_clip_g] == 0)  # no clip below the onset
+    assert np.all(clipped[amplitude > 1.1 * a_clip_g] > 0)  # clips above it
+    assert gain_ratio[-1] < gain_ratio[0]  # gain droops under saturation
     assert optical_thd[-1] > optical_thd[0]  # optical THD grows with amplitude
 
 
