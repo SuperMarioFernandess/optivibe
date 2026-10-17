@@ -2,11 +2,12 @@
 
 *Design* sweeps recompute the analytic ``s_target``/NEA/modulation over ``L``,
 ``R_c``, ``P``, bias or ``FS`` (and across variants) -- cheap, no time-domain run
--- so they reproduce the family trends of doc 08 *and* the SW-26 KB refinement
-(``R_c`` 62.5 -> 31 um lifts the absolute slope x1.31 and the NEA by x1.57, not
-x2). *Response* sweeps run forward + inverse over amplitude (0.1 g - >50 g, where
-the optical curvature and the ADC clip show as THD / gain droop / saturation,
-doc 00) or frequency, and measure the recovered response.
+-- following the optical model of doc 03 §d-§e (R-59: at a fixed eta0/eta_peak the
+slope peaks at ``R_c* = sqrt(A^2 + zR^2)``, and halving ``R_c`` 62.5 -> 31 um
+lowers it x0.851; the earlier SW-26 "x1.31 slope / x1.57 NEA" is revoked).
+*Response* sweeps run forward + inverse over amplitude (where the optical
+curvature and the ADC clip show as THD / gain droop / saturation, doc 00) or
+frequency, and measure the recovered response.
 """
 
 from __future__ import annotations

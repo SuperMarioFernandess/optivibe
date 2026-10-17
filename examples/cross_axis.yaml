@@ -2,8 +2,9 @@
 # axis y of variant B. Pure dy leaves the cylinder coupling exactly unchanged
 # (mirror symmetry, doc 03 §4); the only residual enters through the
 # mechanically coupled tilt theta_x = 1.377 dy / L and is *quadratic* at the
-# working point, so the optical response is suppressed by ~5.9 orders (x ~ 7.4e5 at 10 g) relative
-# to the same tone on x and its dominant line sits at 2f = 240 Hz (doc 04 §5).
+# working point, so the optical response is suppressed (x ~ 1.04e5 at 10 g after R-59, doc 03
+# §e; was ~7.4e5 with the revoked multiplier) relative to the same tone on x and its dominant
+# line sits at 2f = 240 Hz (doc 04 §6).
 # Run from the repo root:  optivibe run examples/cross_axis.yaml
 name: cross-axis
 variant: B

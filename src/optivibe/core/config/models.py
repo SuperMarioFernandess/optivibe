@@ -193,14 +193,17 @@ class OpticsConfig(_Frozen):
     gap_m : float
         Nominal air gap A between the fiber endface and the reflector, m.
         Documented parametric band 20-40 um (doc 03 §6); the default 31 um is
-        the S3 calibration anchoring eta0/eta_peak/slope to the doc 04/05
-        references within 5 % (journal entry of 2026-06-12).
+        the S3 calibration (journal entry of 2026-06-12), which anchored
+        eta0/eta_peak/slope to the doc 04/05 references of the *pre*-R-59
+        optics. With the R-59 overlap (doc 03 v1.6) those references moved --
+        doc 03 §d'' tabulates the current values; the gap itself is unchanged.
     bias_offset_m : float
         Intentional static de-centering Delta x0 setting the working point
-        eta0 on the slope (docs 03 §5, 04 §4). The SNR-optimum rule
+        eta0 on the slope (docs 03 §e, 04 §4). The SNR-optimum rule
         eta0 ~ 0.37 * eta_peak (doc 08, R-40/O-05) is exposed as a helper
-        (:meth:`optivibe.optics.cylinder.CylinderOpticsModel.bias_for_eta_ratio`);
-        in v1 the bias is a static config value.
+        (:meth:`optivibe.optics.cylinder.CylinderOpticsModel.bias_for_eta_ratio`;
+        5.127 / 3.914 um for R_c = 62.5 / 31 um after R-59); in v1 the bias is a
+        static config value (its revision is backlog M-25).
     mode_field_radius_m : float
         Gaussian mode-field radius w0 of the fiber at the source wavelength, m
         (doc 03 §1: w0 = 5.2 um at 1550 nm for SMF-28). Lives in the variant

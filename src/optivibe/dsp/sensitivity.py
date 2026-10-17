@@ -368,17 +368,19 @@ class NonlinearCurveSensitivity:
     """Point-wise inversion of the monotonic ``eta(dx)`` branch (key ``nonlinear_curve``).
 
     For large excursions (>50 g, the non-linearity / break study of doc 00) the
-    scalar slope systematically lies (``THD ~ 2.5 %`` at 0.5 um, doc 03 §5). This
+    scalar slope systematically lies (optical ``HD2 = |4t^2 - 2| d/(8 t sigma_eff)``,
+    doc 03 §e: ~11 % at 0.5 um at the variant-B working point after R-59). This
     strategy reconstructs the *instantaneous* coupling
     ``eta(t) = eta0 + I_AC(t) / (R P rho)`` and inverts the closed-form Gaussian
-    ``eta = eta_peak exp(-(dx_eff/sigma)^2)`` on the branch containing the working
-    point (``dx_eff > 0``, the falling side), then removes the bias and the tilt
-    lever and the QS compliance:
+    ``eta = eta_peak exp(-(dx_eff/sigma_eff)^2)`` (exact for the full overlap of
+    R-59, ``sigma_eff`` = :attr:`CylinderOpticsModel.sigma_m`) on the branch
+    containing the working point (``dx_eff > 0``, the falling side), then removes
+    the bias and the tilt lever and the QS compliance:
 
-    ``dx_eff = sigma sqrt(-ln(eta/eta_peak))``  (working-point branch),
+    ``dx_eff = sigma_eff sqrt(-ln(eta/eta_peak))``  (working-point branch),
     ``dx = (dx_eff - Delta x0) / [1 + 1.377 (R_c + A)/L]``,  ``a = dx / H_lat^QS``.
 
-    Exact for pure target-axis motion (the z-channel is negligible, SW-26), it
+    Exact for pure target-axis motion (the z-channel is negligible, R-41/R-59), it
     reduces to the linear ``static`` recovery for small signals and removes the
     harmonic distortion the scalar leaves at large amplitude. The *full* 3-D /
     breakage inverse stays deferred (14 §8).
